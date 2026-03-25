@@ -44,3 +44,42 @@ If the demo succeeds, the truthful conclusion is:
 > in one bounded end-to-end handoff path under explicit demo assumptions.
 
 If stronger claims are needed, they must be proven separately.
+
+## Reproducible Demo Path
+
+Run the proof from the SAFA workspace:
+
+```powershell
+cargo run -p safa-core --example slime_public_proof
+```
+
+The example:
+
+- writes a dedicated SAFA config fixture into a temporary directory
+- maps `file_write` to the SLIME public domain `test`
+- maps `file_read` to the intentionally unknown domain `unknown.demo`
+- starts the public `slime-runner` with the non-default `integration_demo`
+  feature on this machine
+- posts both mapped handoffs into `POST /action`
+- verifies that the allowed case appends exactly one 32-byte egress record
+- verifies that the impossible case does not append a second record
+
+By default the example looks for the neighboring clone at:
+
+`C:\Users\sebas\projects\slime-phase1b\SLIME\noncanon\implementation_bundle\slime-runner`
+
+If that is not your local path, set `SLIME_RUNNER_DIR` explicitly before
+running the example.
+
+## Observed Result Shape
+
+The current proof is considered successful only if all of the following hold:
+
+- SAFA accepts both `ActionRequest` values as structurally valid
+- SAFA emits the handoff pair `(domain="test", magnitude=7)` for the allowed
+  case
+- SAFA emits the handoff pair `(domain="unknown.demo", magnitude=3)` for the
+  impossible case
+- SLIME returns `AUTHORIZED` for `test`
+- SLIME returns `IMPOSSIBLE` for `unknown.demo`
+- the demo egress sink contains exactly one 32-byte record after both requests
