@@ -20,7 +20,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tower::ServiceBuilder;
 use tower::timeout::TimeoutLayer;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -43,6 +43,72 @@ pub struct RateLimitState {
     pub window_secs: u64,
 }
 
+const REPLAY_CACHE_MAX_ENTRIES: usize = 10_000;
+
+struct ReplayEntry {
+    idempotency_key: Uuid,
+    seen_at: Instant,
+}
+
+struct ReplayCacheState {
+    entries: HashMap<String, ReplayEntry>,
+    max_entries: usize,
+    ttl: Duration,
+}
+
+enum ReplayCheck {
+    New,
+    SameIdempotencyKey,
+    DifferentIdempotencyKey,
+    Full,
+}
+
+impl ReplayCacheState {
+    fn new(max_entries: usize, ttl: Duration) -> Self {
+        Self {
+            entries: HashMap::new(),
+            max_entries,
+            ttl,
+        }
+    }
+
+    fn purge_expired(&mut self) {
+        let now = Instant::now();
+        self.entries.retain(|_, entry| now.duration_since(entry.seen_at) < self.ttl);
+    }
+
+    fn check_or_insert(
+        &mut self,
+        agent_id: &str,
+        timestamp: &str,
+        signature_hex: &str,
+        idempotency_key: Uuid,
+    ) -> ReplayCheck {
+        self.purge_expired();
+        let replay_key = format!("{agent_id}.{timestamp}.{signature_hex}");
+
+        if let Some(existing) = self.entries.get(&replay_key) {
+            if existing.idempotency_key == idempotency_key {
+                return ReplayCheck::SameIdempotencyKey;
+            }
+            return ReplayCheck::DifferentIdempotencyKey;
+        }
+
+        if self.entries.len() >= self.max_entries {
+            return ReplayCheck::Full;
+        }
+
+        self.entries.insert(
+            replay_key,
+            ReplayEntry {
+                idempotency_key,
+                seen_at: Instant::now(),
+            },
+        );
+        ReplayCheck::New
+    }
+}
+
 /// Shared application state wrapped in Arc for thread-safe access.
 pub struct AppState {
     pub config: AmaConfig,
@@ -52,6 +118,7 @@ pub struct AppState {
     pub start_time: Instant,
     pub domain_counters: HashMap<String, AtomicU64>,
     pub agent_rate_limiters: HashMap<String, std::sync::Mutex<RateLimitState>>,
+    replay_cache: std::sync::Mutex<ReplayCacheState>,
     pub proof_store: ProofStore,
 }
 
@@ -93,6 +160,10 @@ impl AppState {
             start_time: Instant::now(),
             domain_counters,
             agent_rate_limiters,
+            replay_cache: std::sync::Mutex::new(ReplayCacheState::new(
+                REPLAY_CACHE_MAX_ENTRIES,
+                Duration::from_secs(identity::TIMESTAMP_TOLERANCE_SECS),
+            )),
             proof_store: ProofStore::new(10_000),
             config,
         })
@@ -199,6 +270,31 @@ fn check_rate_limit(state: &AppState, agent_id: &str) -> bool {
 fn increment_domain_counter(state: &AppState, domain_id: &str) {
     if let Some(counter) = state.domain_counters.get(domain_id) {
         counter.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn check_signed_replay(
+    state: &AppState,
+    agent_id: &str,
+    timestamp: &str,
+    signature_hex: &str,
+    idempotency_key: Uuid,
+) -> Result<(), Response> {
+    let mut replay_cache = state.replay_cache.lock().unwrap();
+    match replay_cache.check_or_insert(agent_id, timestamp, signature_hex, idempotency_key) {
+        ReplayCheck::New | ReplayCheck::SameIdempotencyKey => Ok(()),
+        ReplayCheck::DifferentIdempotencyKey => Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "status": "error",
+                "error_class": "replay_detected",
+                "message": "signed request replay detected",
+            })),
+        )
+            .into_response()),
+        ReplayCheck::Full => Err(ama_error_response(AmaError::ServiceUnavailable {
+            message: "identity replay cache full — fail-closed".into(),
+        })),
     }
 }
 
@@ -321,6 +417,8 @@ async fn handle_action(
         Err(resp) => return resp,
     };
 
+    let mut identity_replay_headers: Option<(String, String)> = None;
+
     // 0.5 P3: Identity binding — verify HMAC if agent has a secret configured
     if let Some(agent_config) = state.config.agents.get(&agent_id) {
         if let Some(ref secret) = agent_config.secret {
@@ -351,18 +449,15 @@ async fn handle_action(
                     })),
                 ).into_response();
             }
+
+            identity_replay_headers = Some((
+                timestamp_str.unwrap().to_string(),
+                signature_hex.unwrap().to_string(),
+            ));
         }
     }
 
-    // 1. Per-agent rate limit
-    if !check_rate_limit(&state, &agent_id) {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            Json(json!({"status": "error", "error_class": "rate_limited", "message": "rate limit exceeded"})),
-        ).into_response();
-    }
-
-    // 2. Extract Idempotency-Key header
+    // 1. Extract Idempotency-Key header
     let idem_key_str = match headers.get("idempotency-key") {
         Some(val) => match val.to_str() {
             Ok(s) => s.to_string(),
@@ -375,11 +470,34 @@ async fn handle_action(
         }),
     };
 
-    // 3. Validate UUID v4 format
+    // 2. Validate UUID v4 format
     let idem_key = match validate_idempotency_key(&idem_key_str) {
         Ok(k) => k,
         Err(e) => return ama_error_response(e),
     };
+
+    // 2.5 P3: reject exact replay of a signed envelope when it arrives
+    // under a different Idempotency-Key. Same envelope + same key is
+    // treated as a legitimate retry and falls through to idempotency.
+    if let Some((timestamp_str, signature_hex)) = &identity_replay_headers {
+        if let Err(resp) = check_signed_replay(
+            &state,
+            &agent_id,
+            timestamp_str,
+            signature_hex,
+            idem_key,
+        ) {
+            return resp;
+        }
+    }
+
+    // 3. Per-agent rate limit
+    if !check_rate_limit(&state, &agent_id) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"status": "error", "error_class": "rate_limited", "message": "rate limit exceeded"})),
+        ).into_response();
+    }
 
     // 4. Idempotency cache check
     match state.idempotency_cache.check_or_insert(idem_key) {
@@ -561,15 +679,25 @@ pub async fn shutdown_signal() {
 
 /// Test helper: build a test server with multiple agents.
 #[cfg(feature = "test-utils")]
-pub async fn test_server_multiagent(
-    agent_specs: Vec<(&str, u64, u64)>, // (agent_id, capacity, rate_limit_per_window)
+#[derive(Debug, Clone)]
+pub struct TestAgentSpec {
+    pub agent_id: String,
+    pub max_capacity: u64,
+    pub rate_limit_per_window: u64,
+    pub rate_limit_window_secs: u64,
+    pub secret: Option<String>,
+}
+
+/// Test helper: build a test server with custom agent specs.
+#[cfg(feature = "test-utils")]
+pub async fn test_server_with_agent_specs(
+    agent_specs: Vec<TestAgentSpec>,
 ) -> axum_test::TestServer {
     use safa_core::config::{AmaConfig, AgentConfig, DomainPolicy, DomainMapping, BootHashes};
 
     let workspace = std::env::temp_dir().join(format!("safa-test-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&workspace).unwrap();
 
-    // Build shared domain policy (all agents get the same fs.write.workspace domain)
     let base_domain_policies = {
         let mut dp = HashMap::new();
         dp.insert("fs.write.workspace".into(), DomainPolicy {
@@ -589,19 +717,19 @@ pub async fn test_server_multiagent(
 
     let mut agents = HashMap::new();
     let mut global_max_capacity: u64 = 0;
-    for (agent_id, capacity, rate_limit) in &agent_specs {
+    for spec in &agent_specs {
         let agent = AgentConfig {
-            agent_id: agent_id.to_string(),
-            max_capacity: *capacity,
-            rate_limit_per_window: *rate_limit,
-            rate_limit_window_secs: 60,
+            agent_id: spec.agent_id.clone(),
+            max_capacity: spec.max_capacity,
+            rate_limit_per_window: spec.rate_limit_per_window,
+            rate_limit_window_secs: spec.rate_limit_window_secs,
             domain_policies: base_domain_policies.clone(),
-            secret: None, // Test agents: no identity binding by default
+            secret: spec.secret.clone(),
         };
-        if *capacity > global_max_capacity {
-            global_max_capacity = *capacity;
+        if spec.max_capacity > global_max_capacity {
+            global_max_capacity = spec.max_capacity;
         }
-        agents.insert(agent_id.to_string(), agent);
+        agents.insert(spec.agent_id.clone(), agent);
     }
 
     let default_agent_id = if agents.len() == 1 {
@@ -636,6 +764,21 @@ pub async fn test_server_multiagent(
     let state = AppState::new(config);
     let app = build_router(state);
     axum_test::TestServer::new(app.into_make_service()).unwrap()
+}
+
+/// Test helper: build a test server with multiple agents.
+#[cfg(feature = "test-utils")]
+pub async fn test_server_multiagent(
+    agent_specs: Vec<(&str, u64, u64)>, // (agent_id, capacity, rate_limit_per_window)
+) -> axum_test::TestServer {
+    let specs = agent_specs.into_iter().map(|(agent_id, capacity, rate_limit)| TestAgentSpec {
+        agent_id: agent_id.to_string(),
+        max_capacity: capacity,
+        rate_limit_per_window: rate_limit,
+        rate_limit_window_secs: 60,
+        secret: None,
+    }).collect();
+    test_server_with_agent_specs(specs).await
 }
 
 /// Test helper: build a test server with default capacity (10000).

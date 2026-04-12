@@ -202,9 +202,22 @@ fn slime_runner_dir() -> DynResult<PathBuf> {
         return Ok(derived);
     }
 
+    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+        let user_projects = PathBuf::from(user_profile)
+            .join("projects")
+            .join("slime-phase1b")
+            .join("SLIME")
+            .join("noncanon")
+            .join("implementation_bundle")
+            .join("slime-runner");
+        if user_projects.is_dir() {
+            return Ok(user_projects);
+        }
+    }
+
     Err(format!(
-        "could not find slime-runner at {}; set SLIME_RUNNER_DIR explicitly",
-        derived.display()
+        "could not find slime-runner at {} or under %USERPROFILE%\\projects; set SLIME_RUNNER_DIR explicitly",
+        derived.display(),
     )
     .into())
 }

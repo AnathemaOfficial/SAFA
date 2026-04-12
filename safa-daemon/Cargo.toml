@@ -57,3 +57,7 @@ required-features = ["test-utils"]
 [[test]]
 name = "p2_adversarial"
 required-features = ["test-utils"]
+
+[[test]]
+name = "p3_http_surface"
+required-features = ["test-utils"]

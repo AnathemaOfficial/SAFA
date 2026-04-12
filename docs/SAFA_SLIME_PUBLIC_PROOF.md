@@ -64,12 +64,13 @@ The example:
 - verifies that the allowed case appends exactly one 32-byte egress record
 - verifies that the impossible case does not append a second record
 
-By default the example looks for the neighboring clone at:
+By default the example first looks for a neighboring checkout derived from the
+SAFA workspace path, then falls back to:
 
-`C:\Users\sebas\projects\slime-phase1b\SLIME\noncanon\implementation_bundle\slime-runner`
+`%USERPROFILE%\projects\slime-phase1b\SLIME\noncanon\implementation_bundle\slime-runner`
 
-If that is not your local path, set `SLIME_RUNNER_DIR` explicitly before
-running the example.
+If neither path matches your local machine, set `SLIME_RUNNER_DIR` explicitly
+before running the example.
 
 ## Observed Result Shape
 
