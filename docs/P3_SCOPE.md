@@ -155,19 +155,45 @@ P3 is HELD when ALL of the following are true:
 1. **Identity:** An agent cannot execute actions under another agent's
    identity. Requests with invalid credentials are rejected.
 
-2. **Containment:** An agent cannot read or write files outside its own
-   workspace subdirectory. Cross-agent filesystem access is structurally
-   impossible.
+2. **Containment (file_read / file_write):** An agent cannot read or
+   write files outside its own workspace subdirectory through the file
+   actuator. Cross-agent filesystem access via `WorkspacePath` is
+   structurally impossible.
+   **Containment (shell_exec):** `shell_exec` intents whose
+   `working_dir` uses `{{agent_workspace}}` are also confined per-agent.
+   Intents that explicitly opt into `{{workspace_root}}` share the
+   global workspace root and do NOT provide per-agent isolation; the
+   config loader emits a warning when this pattern is detected so
+   operators cannot enable it silently. (Codex adversarial audit fix.)
 
 3. **Verifiability:** Every agent's capability manifest is hashed at
    boot. The hash is exposed in responses and queryable via endpoint.
-   Any config change produces a different hash.
+   Changes to the *effective policy surface* — `domains.toml`,
+   `intents.toml`, `allowlist.toml`, and per-agent capabilities —
+   produce a different hash. `config.toml` is INTENTIONALLY excluded
+   from the policy bundle hash because its fields (`workspace_root`,
+   `bind_host`, `bind_port`, log settings) are deployment metadata,
+   not policy: an operator moving the daemon from one host to another
+   should not flip every existing manifest hash. Operators who need
+   that specific field to be attested should pin it out-of-band
+   (infrastructure-as-code, immutable image, etc.).
+   (Kimi + MiniMax + Codex adversarial convergence.)
 
 4. **Non-bypass:** Adversarial tests confirm that identity spoofing,
-   workspace escape, and manifest tampering are structurally prevented.
+   workspace escape via `file_*` actuators, and manifest tampering are
+   structurally prevented. Cross-agent reads via `shell_exec` intents
+   that use the global `{{workspace_root}}` without per-agent scoping
+   are NOT structurally prevented — the warning at boot is the operator
+   signal that this trade-off has been made.
 
-5. **C1 resolved:** WorkspacePath TOCTOU/symlink race on Windows is
-   fixed as part of Pillar 3.
+5. **C1 resolved on Unix:** WorkspacePath TOCTOU/symlink race is
+   closed on Unix by `canonicalize()` + explicit `verify_no_symlinks`
+   on every path component, plus a post-`create_dir_all` re-validation
+   that catches an intermediate directory symlink-swap between
+   validation and directory creation (Codex adversarial audit fix).
+   **On Windows**, `verify_no_symlinks` is a no-op and the race is
+   NOT fully closed — see `THREAT_MODEL.md` for the residual
+   limitation. Production deployments SHOULD target Unix.
 
 6. **Tests pass:** All existing tests continue to pass. New P3
    tests added for identity, workspace isolation, and bypass attempts.

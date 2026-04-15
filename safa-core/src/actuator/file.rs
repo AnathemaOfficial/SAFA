@@ -61,6 +61,37 @@ pub fn file_write(
                     }
                 })?;
             }
+
+            // Codex adversarial audit (+ Ana + Copilot H-04 converged).
+            // Between `verify_no_symlinks(target)` above and this
+            // `create_dir_all`, a concurrent local actor could have
+            // atomically replaced one of the path components with a
+            // symlink pointing outside the workspace. `create_dir_all`
+            // would then walk that symlink and happily create the
+            // directory elsewhere, and the later atomic rename would
+            // land the write outside the workspace boundary. Re-verify
+            // that the created parent still resolves to a location
+            // under the effective workspace root. If the canonical
+            // parent has drifted outside the root, fail closed — the
+            // partially-created directory layout is the attacker's
+            // problem, not the daemon's.
+            let parent_canon = parent.canonicalize().map_err(|e| AmaError::Validation {
+                error_class: "invalid_target".into(),
+                message: format!("cannot re-canonicalize parent after create: {}", e),
+            })?;
+            if !parent_canon.starts_with(path.effective_root()) {
+                return Err(AmaError::Validation {
+                    error_class: "invalid_target".into(),
+                    message: "path escaped workspace boundary during directory creation \
+                              (intermediate-directory TOCTOU)"
+                        .into(),
+                });
+            }
+            // Also re-verify every component of the newly-created tree
+            // is not a symlink; a single symlinked intermediate is
+            // enough to breach containment even if the final
+            // canonicalized location is still under the root.
+            verify_no_symlinks(parent)?;
         }
     }
 

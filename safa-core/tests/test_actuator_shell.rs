@@ -85,6 +85,36 @@ mod tests {
         assert!(result.truncated);
     }
 
+    /// Codex adversarial audit (Grok MED-01 re-attack): regression test
+    /// for the `spawn`-failure path, which is the proximal failure mode
+    /// for any `pre_exec` error (including a failing `setpgid`). If
+    /// `pre_exec` returns an `io::Error`, Rust's `Command::spawn()` turns
+    /// it into a spawn-time error on the parent side, which `shell_exec`
+    /// must surface as a clean `AmaError::ServiceUnavailable` rather than
+    /// panicking or silently returning a half-alive child.
+    ///
+    /// We exercise this path by targeting a binary that does not exist,
+    /// which exits the spawn path at the same place a `setpgid` failure
+    /// would. A true `setpgid` mock would require LD_PRELOAD/libc
+    /// interposition — acceptable follow-up, not required for the
+    /// structural coverage this test provides.
+    #[tokio::test]
+    async fn spawn_failure_is_clean_error_not_panic() {
+        let result = shell_exec(
+            "/bin/this_binary_does_not_exist_xyz",
+            &[],
+            "/tmp",
+            "test-spawn-fail",
+            std::time::Duration::from_secs(5),
+            65_536,
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "missing binary must surface as a clean error, not a hung future"
+        );
+    }
+
     #[tokio::test]
     async fn large_dual_stream_output_does_not_deadlock() {
         let result = shell_exec(
