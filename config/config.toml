@@ -1,5 +1,11 @@
+# SAFA runtime configuration
+# workspace_root: REPLACE with an absolute path to your SAFA workspace directory.
+#   Recommended: keep it outside this repo clone (e.g. /var/lib/safa/workspace
+#   on Linux, C:\safa\workspace on Windows) to avoid checking workspace content
+#   into version control.
+#   Can also be overridden via the SAFA_WORKSPACE_ROOT environment variable.
 [safa]
-workspace_root = "F:\\SYF PROJECT\\SAFA\\workspace"
+workspace_root = "/REPLACE/ME/WITH/ABSOLUTE/PATH/TO/SAFA/WORKSPACE"
 bind_host = "127.0.0.1"
 bind_port = 8787
 

@@ -23,6 +23,29 @@ fn sha256_hex(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Detect known placeholder secrets shipped in the repository's sample configs.
+/// The loader refuses to boot any agent whose resolved secret matches one of
+/// these patterns, to prevent accidental production deployment with a secret
+/// that is public in the git history.
+fn is_known_placeholder(secret: &str) -> bool {
+    let lower = secret.to_ascii_lowercase();
+    // Catch the historical committed samples and any future REPLACE_ME / change-me
+    // markers. Patterns are matched case-insensitively as substrings.
+    const PLACEHOLDER_MARKERS: &[&str] = &[
+        "replace_me",
+        "change-me",
+        "change_me",
+        "changeme",
+        "placeholder",
+        "not-for-production",
+        "not_for_production",
+        "your-secret",
+        "your_own_secret",
+        "example-secret",
+    ];
+    PLACEHOLDER_MARKERS.iter().any(|m| lower.contains(m))
+}
+
 // ── TOML raw structs (serde) ─────────────────────────────────
 
 #[derive(Deserialize)]
@@ -231,22 +254,27 @@ impl AgentConfig {
         let mut domain_policies = HashMap::new();
         for (key, raw_policy) in &agent.domains {
             let domain_id = key.replace('_', ".");
-            if raw_policy.max_magnitude_per_action == 0 {
-                return Err(AmaError::ServiceUnavailable {
-                    message: format!(
-                        "agent '{}' domain '{}': max_magnitude_per_action must be > 0",
-                        agent.agent_id, domain_id
-                    ),
-                });
-            }
-            if raw_policy.max_magnitude_per_action > agent.max_capacity {
-                return Err(AmaError::ServiceUnavailable {
-                    message: format!(
-                        "agent '{}' domain '{}': max_magnitude_per_action ({}) > max_capacity ({})",
-                        agent.agent_id, domain_id,
-                        raw_policy.max_magnitude_per_action, agent.max_capacity
-                    ),
-                });
+            // max_magnitude_per_action constraints only apply to enabled domains.
+            // A disabled domain's magnitude is irrelevant (the domain returns
+            // Impossible before any magnitude check), so `= 0` is legitimate.
+            if raw_policy.enabled {
+                if raw_policy.max_magnitude_per_action == 0 {
+                    return Err(AmaError::ServiceUnavailable {
+                        message: format!(
+                            "agent '{}' domain '{}': max_magnitude_per_action must be > 0 when enabled",
+                            agent.agent_id, domain_id
+                        ),
+                    });
+                }
+                if raw_policy.max_magnitude_per_action > agent.max_capacity {
+                    return Err(AmaError::ServiceUnavailable {
+                        message: format!(
+                            "agent '{}' domain '{}': max_magnitude_per_action ({}) > max_capacity ({})",
+                            agent.agent_id, domain_id,
+                            raw_policy.max_magnitude_per_action, agent.max_capacity
+                        ),
+                    });
+                }
             }
             domain_policies.insert(domain_id, DomainPolicy {
                 enabled: raw_policy.enabled,
@@ -254,8 +282,22 @@ impl AgentConfig {
             });
         }
 
+        // P3: Resolve the effective secret.
+        // Precedence: SAFA_AGENT_SECRET_<AGENT_ID> env var > TOML `secret` field.
+        // The env var route keeps real secrets out of version control; the TOML
+        // route is kept for local/dev convenience, but committed placeholders
+        // are refused at boot to prevent accidental prod exposure.
+        let env_var_name = format!(
+            "SAFA_AGENT_SECRET_{}",
+            agent.agent_id.to_uppercase().replace('-', "_")
+        );
+        let resolved_secret: Option<String> = match std::env::var(&env_var_name) {
+            Ok(v) if !v.is_empty() => Some(v),
+            _ => agent.secret.clone(),
+        };
+
         // P3: Validate secret if present (must be non-empty hex-compatible)
-        if let Some(ref s) = agent.secret {
+        if let Some(ref s) = resolved_secret {
             if s.is_empty() {
                 return Err(AmaError::ServiceUnavailable {
                     message: format!("agent '{}': secret must not be empty if specified", agent.agent_id),
@@ -266,6 +308,14 @@ impl AgentConfig {
                     message: format!("agent '{}': secret must be at least 32 characters", agent.agent_id),
                 });
             }
+            if is_known_placeholder(s) {
+                return Err(AmaError::ServiceUnavailable {
+                    message: format!(
+                        "agent '{}': secret is a known placeholder — set a real secret in config or via {} env var (generate with: openssl rand -hex 32)",
+                        agent.agent_id, env_var_name
+                    ),
+                });
+            }
         }
 
         Ok(Self {
@@ -274,7 +324,7 @@ impl AgentConfig {
             rate_limit_per_window: agent.rate_limit_per_window,
             rate_limit_window_secs: agent.rate_limit_window_secs,
             domain_policies,
-            secret: agent.secret,
+            secret: resolved_secret,
         })
     }
 }
@@ -376,7 +426,22 @@ impl AmaConfig {
         Self::check_schema("safa-allowlist-v1", &raw_allowlist.meta.schema_version, "allowlist.toml")?;
 
         // ── Validate workspace_root ──────────────────────────
-        let workspace_root = PathBuf::from(&raw_config.safa.workspace_root);
+        // Environment variable SAFA_WORKSPACE_ROOT overrides the TOML value,
+        // to keep deployment paths out of committed config.
+        let workspace_root_str = std::env::var("SAFA_WORKSPACE_ROOT")
+            .unwrap_or_else(|_| raw_config.safa.workspace_root.clone());
+
+        // Reject known placeholder strings shipped in the committed example
+        // config — an operator MUST set a real path either in config.toml or
+        // via SAFA_WORKSPACE_ROOT before the daemon can boot.
+        if workspace_root_str.contains("REPLACE") || workspace_root_str.contains("/path/to/") {
+            return Err(Self::boot_err(format!(
+                "workspace_root is still a placeholder: '{}'. Set a real absolute path in config.toml or via SAFA_WORKSPACE_ROOT env var.",
+                workspace_root_str
+            )));
+        }
+
+        let workspace_root = PathBuf::from(&workspace_root_str);
         if !workspace_root.is_absolute() {
             return Err(Self::boot_err("workspace_root must be absolute".into()));
         }

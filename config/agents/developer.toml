@@ -6,8 +6,13 @@ agent_id = "developer"
 max_capacity = 50000
 rate_limit_per_window = 120
 rate_limit_window_secs = 60
-# P3: development placeholder only. Replace outside local development.
-secret = "dev-placeholder-secret-not-for-production"
+# P3: HMAC shared secret for identity binding (min 32 chars).
+# DO NOT ship this placeholder to production — the loader refuses to boot
+# if the secret still matches a known placeholder pattern.
+# Preferred: set environment variable SAFA_AGENT_SECRET_DEVELOPER instead,
+# which overrides this value and keeps the secret out of version control.
+# Generate a real secret with: openssl rand -hex 32
+secret = "REPLACE_ME_WITH_OWN_SECRET_OR_USE_SAFA_AGENT_SECRET_ENV"
 
 [agent.domains.fs_write_workspace]
 enabled = true
