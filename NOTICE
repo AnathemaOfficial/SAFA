@@ -1,0 +1,80 @@
+SAFA — SLIME Adapter for Agents
+================================
+
+Copyright 2025-2026 Technologies CoreXalt Inc.
+All Rights Reserved.
+
+This product (the "Work") is owned by Technologies CoreXalt Inc.
+("CoreXalt"), a Québec corporation (incorporation via notary, 2026).
+
+Provenance and attribution
+--------------------------
+
+The Work was originally authored and developed by:
+
+  - Sébastien Bouchard ("Fireplank"), primary architect, original author,
+    and principal contributor.
+
+Initial authorship and publication occurred under the informal SYFCORP
+operating banner (2025-2026), where the project was briefly known as
+"AMA" (Anathema Media Adapter) before being renamed to "SAFA" (SLIME
+Adapter for Agents) as part of a canon-alignment pass. On the formation
+of Technologies CoreXalt Inc. (2026), all rights, title, and interest in
+the Work — including copyrights, trade secrets, and any associated
+intellectual-property claims — were assigned to CoreXalt.
+
+License
+-------
+
+This Work is licensed under the Apache License, Version 2.0 (the "License");
+you may not use this Work except in compliance with the License. You may
+obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+See the LICENSE file at the root of this repository for the full license
+text. Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+Third-party components
+----------------------
+
+This Work depends on open-source components listed in Cargo.lock, each
+governed by its respective open-source license. A non-exhaustive list of
+principal runtime dependencies includes:
+
+  - tokio (MIT, Copyright 2024 Tokio Contributors)
+  - axum (MIT, Copyright 2021 axum Contributors)
+  - reqwest (MIT/Apache-2.0, Copyright 2016 reqwest Contributors)
+  - serde / serde_json (MIT/Apache-2.0)
+  - hmac / sha2 (MIT/Apache-2.0, RustCrypto Developers)
+  - dashmap (MIT, Copyright 2019 Acrimon)
+  - tower / tower-http (MIT, Copyright 2021 Tower Contributors)
+
+Full attribution and license texts for each dependency are available in
+the `cargo license` output and in each crate's upstream repository.
+
+Trademarks
+----------
+
+"SAFA", "SLIME", "Anathema", "SYF", and related marks used across the
+wider SYF ecosystem are unregistered trademarks of Technologies CoreXalt
+Inc. Use of these marks in derivative works, forks, or products requires
+prior written authorization.
+
+Contact
+-------
+
+For licensing inquiries, commercial-use questions, authorship verification,
+or any other matter concerning this NOTICE or the Work:
+
+    Technologies CoreXalt Inc.
+    Email: syfcorp@proton.me
+
+---
+
+This NOTICE file is provided in accordance with section 4(d) of the
+Apache License 2.0. Redistributions of this Work — in source or binary
+form — must include a copy of this NOTICE as part of any derivative
+attribution.
