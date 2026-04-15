@@ -72,7 +72,30 @@ pub fn file_write(
     );
     let tmp_path = target.with_file_name(&tmp_name);
 
-    let write_result = fs::write(&tmp_path, content.as_str());
+    // TOCTOU-hardened write (Qwen audit finding HIGH-02).
+    //
+    // Previously this was `fs::write(&tmp_path, ...)`, which on Unix will
+    // silently follow a symlink pre-placed at tmp_path — letting an attacker
+    // with filesystem access redirect the write outside the workspace even
+    // though we canonicalized the target. We now open the tmp file with:
+    //   - create_new(true): fail if the path already exists (closes the
+    //     pre-place-tmp race)
+    //   - O_NOFOLLOW on Unix: fail if tmp_path resolves through a symlink
+    //   - O_CLOEXEC on Unix: do not leak the fd to the actuator's children
+    let write_result: std::io::Result<()> = {
+        use std::io::Write;
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        }
+        match opts.open(&tmp_path) {
+            Ok(mut f) => f.write_all(content.as_str().as_bytes()),
+            Err(e) => Err(e),
+        }
+    };
     if let Err(e) = write_result {
         // Cleanup temp on failure
         let _ = fs::remove_file(&tmp_path);
@@ -202,15 +225,21 @@ pub fn cleanup_orphan_temps(workspace_root: &Path) -> usize {
     cleaned
 }
 
-/// Simple recursive directory walker for cleanup.
+/// Iterative directory walker for cleanup. Uses an explicit work stack
+/// rather than recursion so that a deeply-nested workspace cannot exhaust
+/// the thread stack at boot (Qwen audit finding MED-03).
 fn walkdir(dir: &Path) -> Result<Vec<std::path::PathBuf>, std::io::Error> {
     let mut results = vec![];
+    let mut stack: Vec<std::path::PathBuf> = Vec::new();
     if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
+        stack.push(dir.to_path_buf());
+    }
+    while let Some(current) = stack.pop() {
+        for entry in fs::read_dir(&current)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
-                results.extend(walkdir(&path)?);
+                stack.push(path);
             } else {
                 results.push(path);
             }

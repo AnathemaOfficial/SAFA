@@ -116,7 +116,28 @@ impl PublicManifest {
             policy_bundle_hash: policy_bundle_hash.to_string(),
         };
 
-        // Canonical JSON: serde_json with sorted keys (BTreeMap guarantees order)
+        // Canonical JSON serialization.
+        //
+        // Qwen audit finding MED-01 flagged that this does not use a full
+        // RFC 8785 JCS implementation. That is intentional for the current
+        // ManifestForHashing schema:
+        //
+        //   - All string fields are ASCII (agent_id passes `is_ascii_alphanumeric
+        //     || '-' || '_'` at config load; schema_version is a static str;
+        //     policy_bundle_hash is hex; DomainCapability keys come from the
+        //     domain ID set which is also ASCII).
+        //   - All numeric fields are `u64`, rendered by serde_json without
+        //     ambiguity (no floats, no very-large-integer ECMAScript edge case).
+        //   - All booleans serialize as `true` / `false`.
+        //   - Keys are ordered by BTreeMap insertion (lexicographic byte order,
+        //     which matches JCS's UTF-16 lexicographic ordering for ASCII).
+        //
+        // Under these constraints, `serde_json::to_string` produces a byte-
+        // equivalent output to JCS. If ManifestForHashing ever grows a float,
+        // a Unicode-rich string field, or a non-deterministic collection type,
+        // switch to a real JCS crate (e.g. `serde_jcs` or `json-canonicalize`)
+        // before releasing — otherwise cross-language auditors may compute a
+        // different hash.
         let canonical_json =
             serde_json::to_string(&hashable).expect("ManifestForHashing must serialize");
 

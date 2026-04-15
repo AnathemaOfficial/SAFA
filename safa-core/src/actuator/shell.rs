@@ -48,10 +48,16 @@ pub async fn shell_exec(
         .env("SAFA_ACTION_ID", action_id);
 
     // SAFETY: pre_exec runs after fork, before exec in child process.
-    // setpgid(0,0) puts child in its own process group for kill containment.
+    // setpgid(0,0) puts the child in its own process group so the daemon
+    // can kill the whole tree on timeout. We propagate the setpgid failure
+    // — previously the return value was discarded and the child would
+    // continue in the parent's process group, silently breaking
+    // kill-containment (Qwen audit finding HIGH-03).
     unsafe {
         cmd.pre_exec(|| {
-            libc::setpgid(0, 0);
+            if libc::setpgid(0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
             Ok(())
         });
     }
