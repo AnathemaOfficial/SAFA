@@ -1,10 +1,10 @@
-use crate::audit::{compute_request_hash, log_audit, AuditEntry};
+use crate::audit::{compute_request_hash, log_audit, timestamp_now, AuditEntry};
 use crate::canonical::{ActionResult, CanonicalAction};
 use crate::config::AmaConfig;
 use crate::errors::AmaError;
 use crate::mapper::map_action;
 use crate::newtypes::*;
-use crate::schema::{ActionRequest, ActionResponse, validate_magnitude};
+use crate::schema::{validate_adapter, validate_magnitude, ActionRequest, ActionResponse};
 use crate::slime::{SlimeAuthorizer, SlimeVerdict};
 use std::time::{Duration, Instant};
 
@@ -83,33 +83,43 @@ pub fn validate_field_exclusivity(request: &ActionRequest) -> Result<(), AmaErro
 
 /// Canonicalize: construct type-safe newtypes from raw request.
 /// P3: agent_id enables per-agent workspace isolation.
-fn canonicalize(request: &ActionRequest, config: &AmaConfig, agent_id: Option<&str>) -> Result<CanonicalAction, AmaError> {
+fn canonicalize(
+    request: &ActionRequest,
+    config: &AmaConfig,
+    agent_id: Option<&str>,
+) -> Result<CanonicalAction, AmaError> {
     match request.action.as_str() {
         "file_write" => {
-            let path = WorkspacePath::new_with_agent(&request.target, &config.workspace_root, agent_id)?;
-            let max_payload = config.domain_mappings
+            let path =
+                WorkspacePath::new_with_agent(&request.target, &config.workspace_root, agent_id)?;
+            let max_payload = config
+                .domain_mappings
                 .get("file_write")
                 .and_then(|m| m.max_payload_bytes)
                 .unwrap_or(1_048_576);
-            let content = BoundedBytes::new(
-                request.payload.clone().unwrap_or_default(),
-                max_payload,
-            )?;
+            let content =
+                BoundedBytes::new(request.payload.clone().unwrap_or_default(), max_payload)?;
             Ok(CanonicalAction::FileWrite { path, content })
         }
         "file_read" => {
-            let path = WorkspacePath::new_with_agent(&request.target, &config.workspace_root, agent_id)?;
+            let path =
+                WorkspacePath::new_with_agent(&request.target, &config.workspace_root, agent_id)?;
             Ok(CanonicalAction::FileRead { path })
         }
         "shell_exec" => {
             let intent = IntentId::new(&request.target)?;
-            let intent_config = config.intents.get(intent.as_str())
-                .ok_or_else(|| AmaError::Validation {
-                    error_class: "unknown_intent".into(),
-                    message: format!("intent '{}' not in intents.toml", intent.as_str()),
-                })?;
+            let intent_config =
+                config
+                    .intents
+                    .get(intent.as_str())
+                    .ok_or_else(|| AmaError::Validation {
+                        error_class: "unknown_intent".into(),
+                        message: format!("intent '{}' not in intents.toml", intent.as_str()),
+                    })?;
             let raw_args = request.args.as_deref().unwrap_or(&[]);
-            let placeholder_count = intent_config.args_template.iter()
+            let placeholder_count = intent_config
+                .args_template
+                .iter()
                 .filter(|t| t.contains("{{"))
                 .count();
             if raw_args.len() != placeholder_count {
@@ -117,7 +127,9 @@ fn canonicalize(request: &ActionRequest, config: &AmaConfig, agent_id: Option<&s
                     error_class: "invalid_args".into(),
                     message: format!(
                         "intent '{}' expects {} args, got {}",
-                        intent.as_str(), placeholder_count, raw_args.len()
+                        intent.as_str(),
+                        placeholder_count,
+                        raw_args.len()
                     ),
                 });
             }
@@ -143,7 +155,8 @@ fn canonicalize(request: &ActionRequest, config: &AmaConfig, agent_id: Option<&s
                     // This enforces the per-entry `max_body_bytes` declared in
                     // allowlist.toml in addition to the global domain cap from
                     // domains.toml. Previously only the global cap was applied.
-                    let domain_max = config.domain_mappings
+                    let domain_max = config
+                        .domain_mappings
                         .get("http_request")
                         .and_then(|m| m.max_payload_bytes)
                         .unwrap_or(262_144);
@@ -175,7 +188,9 @@ async fn actuate(
             let timeout = action_timeout("file_write");
             let result = tokio::time::timeout(timeout, async {
                 crate::actuator::file::file_write(&path, &content, action_id)
-            }).await.map_err(|_| AmaError::ServiceUnavailable {
+            })
+            .await
+            .map_err(|_| AmaError::ServiceUnavailable {
                 message: "file_write timed out".into(),
             })??;
             Ok(ActionResult::FileWrite {
@@ -186,7 +201,9 @@ async fn actuate(
             let timeout = action_timeout("file_read");
             let result = tokio::time::timeout(timeout, async {
                 crate::actuator::file::file_read(&path, 524_288)
-            }).await.map_err(|_| AmaError::ServiceUnavailable {
+            })
+            .await
+            .map_err(|_| AmaError::ServiceUnavailable {
                 message: "file_read timed out".into(),
             })??;
             Ok(ActionResult::FileRead {
@@ -198,10 +215,11 @@ async fn actuate(
         }
         #[cfg(unix)]
         CanonicalAction::ShellExec { intent, args } => {
-            let intent_config = config.intents.get(intent.as_str())
-                .ok_or_else(|| AmaError::ServiceUnavailable {
+            let intent_config = config.intents.get(intent.as_str()).ok_or_else(|| {
+                AmaError::ServiceUnavailable {
                     message: "intent config not found at actuation".into(),
-                })?;
+                }
+            })?;
             let mut exec_args: Vec<String> = Vec::new();
             for tmpl in &intent_config.args_template {
                 if let Some(idx_str) = tmpl.strip_prefix("{{").and_then(|s| s.strip_suffix("}}")) {
@@ -214,7 +232,8 @@ async fn actuate(
                 }
                 exec_args.push(tmpl.clone());
             }
-            let working_dir = intent_config.working_dir
+            let working_dir = intent_config
+                .working_dir
                 .as_deref()
                 .unwrap_or(config.workspace_root.to_str().unwrap_or("/tmp"));
             let timeout = action_timeout("shell_exec");
@@ -226,7 +245,8 @@ async fn actuate(
                 action_id,
                 timeout,
                 65_536,
-            ).await?;
+            )
+            .await?;
             Ok(ActionResult::ShellExec {
                 stdout: result.stdout,
                 stderr: result.stderr,
@@ -235,21 +255,17 @@ async fn actuate(
             })
         }
         #[cfg(not(unix))]
-        CanonicalAction::ShellExec { .. } => {
-            Err(AmaError::ServiceUnavailable {
-                message: "shell_exec is only supported on Unix/Linux".into(),
-            })
-        }
+        CanonicalAction::ShellExec { .. } => Err(AmaError::ServiceUnavailable {
+            message: "shell_exec is only supported on Unix/Linux".into(),
+        }),
         CanonicalAction::HttpRequest { method, url, body } => {
             let timeout_dur = action_timeout("http_request");
             let result = tokio::time::timeout(timeout_dur, async {
-                crate::actuator::http::http_request(
-                    method,
-                    &url,
-                    body.as_ref(),
-                    &config.allowlist,
-                ).await
-            }).await.map_err(|_| AmaError::ServiceUnavailable {
+                crate::actuator::http::http_request(method, &url, body.as_ref(), &config.allowlist)
+                    .await
+            })
+            .await
+            .map_err(|_| AmaError::ServiceUnavailable {
                 message: "http_request timed out".into(),
             })??;
             Ok(ActionResult::HttpResponse {
@@ -273,6 +289,7 @@ pub async fn process_action(
     let start = Instant::now();
 
     // 1. Validate magnitude
+    validate_adapter(&request.adapter)?;
     validate_magnitude(request.magnitude)?;
 
     // 2. Validate mutual exclusivity of payload/args per action
@@ -296,7 +313,7 @@ pub async fn process_action(
             SlimeVerdict::Impossible => "impossible",
         };
         log_audit(&AuditEntry {
-            timestamp: chrono_now(),
+            timestamp: timestamp_now(),
             session_id: session_id.into(),
             action_id: action_id.clone(),
             adapter: request.adapter.clone(),
@@ -324,7 +341,7 @@ pub async fn process_action(
         SlimeVerdict::Authorized => {}
         SlimeVerdict::Impossible => {
             log_audit(&AuditEntry {
-                timestamp: chrono_now(),
+                timestamp: timestamp_now(),
                 session_id: session_id.into(),
                 action_id: action_id.clone(),
                 adapter: request.adapter.clone(),
@@ -349,7 +366,7 @@ pub async fn process_action(
     };
 
     log_audit(&AuditEntry {
-        timestamp: chrono_now(),
+        timestamp: timestamp_now(),
         session_id: session_id.into(),
         action_id: action_id.clone(),
         adapter: request.adapter.clone(),
@@ -370,11 +387,4 @@ pub async fn process_action(
         dry_run: false,
         result: Some(serde_json::to_value(&result).unwrap()),
     })
-}
-
-/// Helper: simple timestamp (no chrono dep — use std).
-fn chrono_now() -> String {
-    let now = std::time::SystemTime::now();
-    let duration = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    format!("{}", duration.as_secs())
 }

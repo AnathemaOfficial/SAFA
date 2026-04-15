@@ -14,7 +14,7 @@
 
 use crate::config::AgentConfig;
 use serde::Serialize;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 /// Public representation of an agent's capability manifest.
@@ -117,8 +117,8 @@ impl PublicManifest {
         };
 
         // Canonical JSON: serde_json with sorted keys (BTreeMap guarantees order)
-        let canonical_json = serde_json::to_string(&hashable)
-            .expect("ManifestForHashing must serialize");
+        let canonical_json =
+            serde_json::to_string(&hashable).expect("ManifestForHashing must serialize");
 
         let mut hasher = Sha256::new();
         hasher.update(canonical_json.as_bytes());

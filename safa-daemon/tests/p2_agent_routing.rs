@@ -61,11 +61,9 @@ async fn test_unknown_agent_id_rejected() {
 
 #[tokio::test]
 async fn test_valid_agent_id_routes_to_correct_budget() {
-    let server = safa_daemon::server::test_server_multiagent(vec![
-        ("small", 5, 60),
-        ("large", 10000, 60),
-    ])
-    .await;
+    let server =
+        safa_daemon::server::test_server_multiagent(vec![("small", 5, 60), ("large", 10000, 60)])
+            .await;
 
     // Exhaust small agent's capacity
     for i in 0..5 {

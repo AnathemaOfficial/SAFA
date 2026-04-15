@@ -80,7 +80,9 @@ fn allowlisted_url_rejects_disallowed_method() {
     // GET is permitted.
     assert!(AllowlistedUrl::new("https://api.github.com/foo", HttpMethod::Get, &patterns).is_ok());
     // POST is NOT in the methods list — must be rejected.
-    assert!(AllowlistedUrl::new("https://api.github.com/foo", HttpMethod::Post, &patterns).is_err());
+    assert!(
+        AllowlistedUrl::new("https://api.github.com/foo", HttpMethod::Post, &patterns).is_err()
+    );
 }
 
 #[test]
@@ -104,7 +106,7 @@ fn allowlisted_url_rejects_subdomain_confusion() {
     // (so the wildcard technically could extend the hostname), the matcher
     // must refuse URLs whose authority doesn't end at a structural boundary.
     let patterns = vec![AllowlistEntry {
-        pattern: "https://api.github.com*".to_string(),   // no '/' before '*'
+        pattern: "https://api.github.com*".to_string(), // no '/' before '*'
         methods: vec!["GET".to_string()],
         max_body_bytes: None,
     }];
@@ -115,11 +117,13 @@ fn allowlisted_url_rejects_subdomain_confusion() {
         "https://api.github.com.evil.com/steal",
         HttpMethod::Get,
         &patterns
-    ).is_err());
+    )
+    .is_err());
     // Port variant → also must be rejected if it extends the hostname
     assert!(AllowlistedUrl::new(
         "https://api.github.com-evil.com/x",
         HttpMethod::Get,
         &patterns
-    ).is_err());
+    )
+    .is_err());
 }

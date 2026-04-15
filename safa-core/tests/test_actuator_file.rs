@@ -1,7 +1,7 @@
 use safa_core::actuator::file::*;
 use safa_core::newtypes::*;
-use tempfile::TempDir;
 use std::fs;
+use tempfile::TempDir;
 
 #[test]
 fn writes_file_atomically() {
@@ -13,7 +13,10 @@ fn writes_file_atomically() {
 
     let result = file_write(&path, &content, action_id).unwrap();
     assert_eq!(result.bytes_written, 11);
-    assert_eq!(fs::read_to_string(workspace.join("test.txt")).unwrap(), "hello world");
+    assert_eq!(
+        fs::read_to_string(workspace.join("test.txt")).unwrap(),
+        "hello world"
+    );
 }
 
 #[test]

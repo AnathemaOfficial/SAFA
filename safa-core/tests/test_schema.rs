@@ -66,3 +66,38 @@ fn parses_http_request_with_method() {
     let req: ActionRequest = serde_json::from_str(json).unwrap();
     assert_eq!(req.method, Some("GET".to_string()));
 }
+
+#[test]
+fn rejects_adapter_with_control_chars() {
+    let req = ActionRequest {
+        adapter: "bad\nadapter".into(),
+        action: "file_write".into(),
+        target: "x".into(),
+        magnitude: 1,
+        dry_run: false,
+        method: None,
+        payload: Some("hello".into()),
+        args: None,
+    };
+    assert!(validate_adapter(&req.adapter).is_err());
+}
+
+#[test]
+fn rejects_adapter_over_64_chars() {
+    let req = ActionRequest {
+        adapter: "a".repeat(65),
+        action: "file_write".into(),
+        target: "x".into(),
+        magnitude: 1,
+        dry_run: false,
+        method: None,
+        payload: Some("hello".into()),
+        args: None,
+    };
+    assert!(validate_adapter(&req.adapter).is_err());
+}
+
+#[test]
+fn accepts_identifier_style_adapter() {
+    assert!(validate_adapter("slapy_mobile-preview_1").is_ok());
+}

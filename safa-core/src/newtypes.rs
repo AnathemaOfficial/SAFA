@@ -101,7 +101,9 @@ impl WorkspacePath {
         // P3: Verify containment — canonical path must start with effective root.
         // Only check if canonicalize() was actually performed (parent existed).
         let effective_root_canon = if effective_root.exists() {
-            effective_root.canonicalize().unwrap_or(effective_root.clone())
+            effective_root
+                .canonicalize()
+                .unwrap_or(effective_root.clone())
         } else {
             effective_root.clone()
         };
@@ -119,8 +121,12 @@ impl WorkspacePath {
         })
     }
 
-    pub fn canonical(&self) -> &Path { &self.canonical }
-    pub fn relative(&self) -> &str { &self.relative }
+    pub fn canonical(&self) -> &Path {
+        &self.canonical
+    }
+    pub fn relative(&self) -> &str {
+        &self.relative
+    }
 }
 
 /// Bytes guaranteed to be valid UTF-8 and within size limit.
@@ -138,9 +144,15 @@ impl BoundedBytes {
         Ok(Self(data))
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
-    pub fn len(&self) -> usize { self.0.len() }
-    pub fn is_empty(&self) -> bool { self.0.is_empty() }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 /// A shell argument guaranteed to have no null bytes and be non-empty.
@@ -164,7 +176,9 @@ impl SafeArg {
         Ok(Self(arg.to_string()))
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// An intent ID that exists in intents.toml. Alphanumeric + underscore only.
@@ -188,7 +202,9 @@ impl IntentId {
         Ok(Self(id.to_string()))
     }
 
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Allowlist entry for URL matching.
@@ -277,7 +293,9 @@ impl AllowlistedUrl {
         })
     }
 
-    pub fn as_str(&self) -> &str { &self.url }
+    pub fn as_str(&self) -> &str {
+        &self.url
+    }
 
     /// Returns the per-entry `max_body_bytes` cap from the matched allowlist
     /// entry, or `None` if the entry did not declare one (in which case the

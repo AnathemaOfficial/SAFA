@@ -6,8 +6,14 @@ pub struct DomainMapping {
     pub magnitude: u64,
 }
 
-pub fn map_action(action: &str, magnitude: u64, config: &AmaConfig) -> Result<DomainMapping, AmaError> {
-    let domain_entry = config.domain_mappings.get(action)
+pub fn map_action(
+    action: &str,
+    magnitude: u64,
+    config: &AmaConfig,
+) -> Result<DomainMapping, AmaError> {
+    let domain_entry = config
+        .domain_mappings
+        .get(action)
         .ok_or_else(|| AmaError::Validation {
             error_class: "unknown_action".into(),
             message: format!("action '{}' not in domains.toml", action),

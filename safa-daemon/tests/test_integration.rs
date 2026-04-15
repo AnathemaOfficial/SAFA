@@ -18,7 +18,8 @@ async fn version_returns_info() {
 #[tokio::test]
 async fn action_without_idempotency_key_returns_400() {
     let server = test_server().await;
-    let resp = server.post("/ama/action")
+    let resp = server
+        .post("/ama/action")
         .json(&serde_json::json!({
             "adapter": "test",
             "action": "file_write",
@@ -33,7 +34,8 @@ async fn action_without_idempotency_key_returns_400() {
 #[tokio::test]
 async fn valid_file_write_returns_200() {
     let server = test_server().await;
-    let resp = server.post("/ama/action")
+    let resp = server
+        .post("/ama/action")
         .add_header(
             axum::http::header::HeaderName::from_static("idempotency-key"),
             axum::http::header::HeaderValue::from_str(&uuid::Uuid::new_v4().to_string()).unwrap(),
@@ -53,7 +55,8 @@ async fn valid_file_write_returns_200() {
 async fn impossible_returns_403() {
     let server = test_server_with_capacity(1).await;
     // First call succeeds
-    server.post("/ama/action")
+    server
+        .post("/ama/action")
         .add_header(
             axum::http::header::HeaderName::from_static("idempotency-key"),
             axum::http::header::HeaderValue::from_str(&uuid::Uuid::new_v4().to_string()).unwrap(),
@@ -65,7 +68,8 @@ async fn impossible_returns_403() {
         .await
         .assert_status_ok();
     // Second call: capacity exhausted
-    let resp = server.post("/ama/action")
+    let resp = server
+        .post("/ama/action")
         .add_header(
             axum::http::header::HeaderName::from_static("idempotency-key"),
             axum::http::header::HeaderValue::from_str(&uuid::Uuid::new_v4().to_string()).unwrap(),
@@ -76,5 +80,7 @@ async fn impossible_returns_403() {
         }))
         .await;
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
-    resp.assert_json(&serde_json::json!({"status": "impossible"}));
+    let body = resp.json::<serde_json::Value>();
+    assert_eq!(body["status"], "impossible");
+    assert!(body["action_id"].as_str().is_some());
 }

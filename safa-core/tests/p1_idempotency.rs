@@ -8,9 +8,11 @@
 ///   - Tests 1, 3, 4, 8: PASS (sequential semantics already work)
 ///   - Test 2, 7: FAIL (race condition in check-then-insert)
 ///   - Tests 5, 6: FAIL (P0 uses remove() instead of commit-to-DONE)
-
 use safa_core::idempotency::{IdempotencyCache, IdempotencyStatus};
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -27,7 +29,10 @@ fn test_idempotency_sequential_replay() {
 
     // First request: should be New (ABSENT → IN_FLIGHT)
     let status = cache.check_or_insert(key);
-    assert!(matches!(status, IdempotencyStatus::New), "first request must be New");
+    assert!(
+        matches!(status, IdempotencyStatus::New),
+        "first request must be New"
+    );
 
     // Complete the action (IN_FLIGHT → DONE)
     cache.complete(key, r#"{"result":"success"}"#.to_string());
@@ -152,14 +157,18 @@ fn test_idempotency_replay_after_timeout() {
     assert!(matches!(status, IdempotencyStatus::New));
 
     // Timeout occurs — Model A says commit the timeout as terminal result
-    let timeout_result = r#"{"status":"timeout","message":"execution exceeded deadline"}"#.to_string();
+    let timeout_result =
+        r#"{"status":"timeout","message":"execution exceeded deadline"}"#.to_string();
     cache.complete(key, timeout_result.clone());
 
     // Replay after timeout — must return committed timeout, not New
     let status = cache.check_or_insert(key);
     match status {
         IdempotencyStatus::Cached(body) => {
-            assert_eq!(body, timeout_result, "replay must return committed timeout result");
+            assert_eq!(
+                body, timeout_result,
+                "replay must return committed timeout result"
+            );
         }
         other => panic!(
             "Model A violation: after timeout commit, replay returned {:?} instead of Cached",
@@ -192,7 +201,10 @@ fn test_idempotency_replay_after_denial() {
     let status = cache.check_or_insert(key);
     match status {
         IdempotencyStatus::Cached(body) => {
-            assert_eq!(body, denial_result, "replay must return committed denial result");
+            assert_eq!(
+                body, denial_result,
+                "replay must return committed denial result"
+            );
         }
         other => panic!(
             "Model A violation: after denial commit, replay returned {:?} instead of Cached",

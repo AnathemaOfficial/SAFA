@@ -1,6 +1,6 @@
 use safa_core::idempotency::*;
-use uuid::Uuid;
 use std::time::Duration;
+use uuid::Uuid;
 
 #[test]
 fn validates_uuid_v4_format() {

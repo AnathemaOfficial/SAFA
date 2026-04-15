@@ -1,6 +1,6 @@
 use axum::http::header::{HeaderName, HeaderValue};
 use bytes::Bytes;
-use safa_core::config::{AgentConfig, DomainPolicy};
+use safa_core::config::{AgentConfig, BootHashes, DomainPolicy};
 use safa_core::identity::compute_signature;
 use safa_core::manifest::PublicManifest;
 use safa_daemon::server::{test_server, test_server_with_agent_specs, TestAgentSpec};
@@ -52,7 +52,12 @@ fn body_bytes(target: &str) -> Vec<u8> {
     serde_json::to_vec(&action_request(target)).unwrap()
 }
 
-fn build_test_agent(agent_id: &str, secret: Option<&str>, rate_limit_per_window: u64, rate_limit_window_secs: u64) -> TestAgentSpec {
+fn build_test_agent(
+    agent_id: &str,
+    secret: Option<&str>,
+    rate_limit_per_window: u64,
+    rate_limit_window_secs: u64,
+) -> TestAgentSpec {
     TestAgentSpec {
         agent_id: agent_id.to_string(),
         max_capacity: 10_000,
@@ -62,7 +67,20 @@ fn build_test_agent(agent_id: &str, secret: Option<&str>, rate_limit_per_window:
     }
 }
 
-fn manifest_hash_for(agent_id: &str, secret: Option<&str>, rate_limit_per_window: u64, rate_limit_window_secs: u64) -> String {
+fn manifest_hash_for(
+    agent_id: &str,
+    secret: Option<&str>,
+    rate_limit_per_window: u64,
+    rate_limit_window_secs: u64,
+) -> String {
+    let bundle_hash = BootHashes {
+        config_hash: "test".into(),
+        domains_hash: "test".into(),
+        intents_hash: "test".into(),
+        allowlist_hash: "test".into(),
+        agents_hash: "test".into(),
+    }
+    .policy_bundle_hash();
     let agent = AgentConfig {
         agent_id: agent_id.to_string(),
         max_capacity: 10_000,
@@ -71,14 +89,17 @@ fn manifest_hash_for(agent_id: &str, secret: Option<&str>, rate_limit_per_window
         domain_policies: default_domain_policies(),
         secret: secret.map(|s| s.to_string()),
     };
-    PublicManifest::from_agent_config(&agent).hash().to_string()
+    PublicManifest::from_agent_config(&agent, &bundle_hash)
+        .hash()
+        .to_string()
 }
 
 #[tokio::test]
 async fn signed_request_succeeds_and_sets_policy_hash() {
     let secret = "0123456789abcdef0123456789abcdef";
     let agent_id = "signed-agent";
-    let server = test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
 
     let body = body_bytes("signed.txt");
     let timestamp = now_secs().to_string();
@@ -103,7 +124,8 @@ async fn signed_request_succeeds_and_sets_policy_hash() {
 async fn exact_signed_replay_with_different_idempotency_key_returns_403() {
     let secret = "0123456789abcdef0123456789abcdef";
     let agent_id = "signed-agent";
-    let server = test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
 
     let body = body_bytes("replay-different-key.txt");
     let timestamp = now_secs().to_string();
@@ -142,7 +164,8 @@ async fn exact_signed_replay_with_different_idempotency_key_returns_403() {
 async fn exact_signed_retry_with_same_idempotency_key_replays_cached_result() {
     let secret = "0123456789abcdef0123456789abcdef";
     let agent_id = "signed-agent";
-    let server = test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
 
     let body = body_bytes("replay-same-key.txt");
     let timestamp = now_secs().to_string();
@@ -173,14 +196,18 @@ async fn exact_signed_retry_with_same_idempotency_key_replays_cached_result() {
     resp2.assert_status_ok();
     let body2 = resp2.json::<Value>();
 
-    assert_eq!(body2, body1, "same envelope + same key should replay cached result");
+    assert_eq!(
+        body2, body1,
+        "same envelope + same key should replay cached result"
+    );
 }
 
 #[tokio::test]
 async fn missing_signature_header_returns_403() {
     let secret = "0123456789abcdef0123456789abcdef";
     let agent_id = "signed-agent";
-    let server = test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
 
     let body = body_bytes("missing-signature.txt");
     let timestamp = now_secs().to_string();
@@ -206,7 +233,8 @@ async fn missing_signature_header_returns_403() {
 async fn missing_timestamp_header_returns_403() {
     let secret = "0123456789abcdef0123456789abcdef";
     let agent_id = "signed-agent";
-    let server = test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
 
     let body = body_bytes("missing-timestamp.txt");
     let signature = compute_signature(secret, agent_id, &now_secs().to_string(), &body);
@@ -232,7 +260,8 @@ async fn missing_timestamp_header_returns_403() {
 async fn invalid_signature_format_returns_403() {
     let secret = "0123456789abcdef0123456789abcdef";
     let agent_id = "signed-agent";
-    let server = test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
 
     let body = body_bytes("invalid-signature.txt");
     let timestamp = now_secs().to_string();
@@ -259,7 +288,8 @@ async fn invalid_signature_format_returns_403() {
 async fn tampered_body_signature_returns_403() {
     let secret = "0123456789abcdef0123456789abcdef";
     let agent_id = "signed-agent";
-    let server = test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent(agent_id, Some(secret), 60, 60)]).await;
 
     let signed_body = body_bytes("signed-body.txt");
     let tampered_body = body_bytes("tampered-body.txt");
@@ -286,7 +316,8 @@ async fn tampered_body_signature_returns_403() {
 
 #[tokio::test]
 async fn unsigned_request_to_unbound_agent_still_succeeds() {
-    let server = test_server_with_agent_specs(vec![build_test_agent("compat-agent", None, 60, 60)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent("compat-agent", None, 60, 60)]).await;
 
     let resp = server
         .post("/ama/action")
@@ -324,7 +355,10 @@ async fn malformed_json_is_cached_as_terminal_result() {
     resp2.assert_status_ok();
     let body2 = resp2.json::<Value>();
 
-    assert_eq!(body2, body1, "retry with same key should replay cached terminal error");
+    assert_eq!(
+        body2, body1,
+        "retry with same key should replay cached terminal error"
+    );
 }
 
 #[tokio::test]
@@ -342,7 +376,8 @@ async fn wrong_content_type_returns_415() {
 
 #[tokio::test]
 async fn rate_limit_window_resets_after_elapsed_window() {
-    let server = test_server_with_agent_specs(vec![build_test_agent("window-agent", None, 2, 1)]).await;
+    let server =
+        test_server_with_agent_specs(vec![build_test_agent("window-agent", None, 2, 1)]).await;
 
     for idx in 0..2 {
         let resp = server

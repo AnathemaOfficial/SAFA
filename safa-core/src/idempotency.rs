@@ -1,6 +1,6 @@
 use crate::errors::AmaError;
-use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -141,9 +141,8 @@ impl IdempotencyCache {
     /// Purge entries beyond TTL.
     fn purge_expired(&self) {
         let now = Instant::now();
-        self.entries.retain(|_, entry| {
-            now.duration_since(entry.created_at) < self.ttl
-        });
+        self.entries
+            .retain(|_, entry| now.duration_since(entry.created_at) < self.ttl);
     }
 
     /// Current cache size (for /ama/status).

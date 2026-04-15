@@ -36,7 +36,11 @@ impl P0Authorizer {
         }
     }
 
-    fn check_policy(&self, domain_id: &DomainId, magnitude: u64) -> Result<&DomainPolicy, SlimeVerdict> {
+    fn check_policy(
+        &self,
+        domain_id: &DomainId,
+        magnitude: u64,
+    ) -> Result<&DomainPolicy, SlimeVerdict> {
         let policy = match self.domains.get(domain_id) {
             Some(p) => p,
             None => return Err(SlimeVerdict::Impossible),
@@ -61,8 +65,10 @@ impl SlimeAuthorizer for P0Authorizer {
             match current.checked_add(magnitude) {
                 Some(new) if new <= self.max_capacity => {
                     match self.capacity.compare_exchange_weak(
-                        current, new,
-                        Ordering::AcqRel, Ordering::Acquire,
+                        current,
+                        new,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
                     ) {
                         Ok(_) => return SlimeVerdict::Authorized,
                         Err(_) => continue,
@@ -106,7 +112,8 @@ impl AgentRegistry {
     pub fn new(configs: Vec<AgentConfig>) -> Self {
         let mut agents = HashMap::new();
         for config in configs {
-            let domains: Vec<(DomainId, DomainPolicy)> = config.domain_policies.into_iter().collect();
+            let domains: Vec<(DomainId, DomainPolicy)> =
+                config.domain_policies.into_iter().collect();
             let authorizer = P0Authorizer::new(config.max_capacity, domains);
             agents.insert(config.agent_id, authorizer);
         }

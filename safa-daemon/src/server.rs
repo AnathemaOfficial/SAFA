@@ -1,14 +1,15 @@
-use safa_core::audit::ProofStore;
+use safa_core::audit::{timestamp_now, ProofStore, ProofVerdict};
 use safa_core::config::AmaConfig;
 use safa_core::errors::AmaError;
-use safa_core::identity;
 use safa_core::idempotency::{validate_idempotency_key, IdempotencyCache, IdempotencyStatus};
+use safa_core::identity;
 use safa_core::manifest::PublicManifest;
 use safa_core::pipeline::process_action;
 use safa_core::schema::ActionRequest;
 use safa_core::slime::{AgentRegistry, SlimeAuthorizer};
 
 use axum::body::Body;
+use axum::error_handling::HandleErrorLayer;
 use axum::extract::State;
 use axum::http::{header, Request, StatusCode};
 use axum::middleware::{self, Next};
@@ -21,10 +22,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tower::ServiceBuilder;
 use tower::timeout::TimeoutLayer;
+use tower::ServiceBuilder;
 use tower_http::limit::RequestBodyLimitLayer;
-use axum::error_handling::HandleErrorLayer;
 use uuid::Uuid;
 
 /// Convert an AmaError into an axum Response using the http_status_and_body() method.
@@ -74,7 +74,8 @@ impl ReplayCacheState {
 
     fn purge_expired(&mut self) {
         let now = Instant::now();
-        self.entries.retain(|_, entry| now.duration_since(entry.seen_at) < self.ttl);
+        self.entries
+            .retain(|_, entry| now.duration_since(entry.seen_at) < self.ttl);
     }
 
     fn check_or_insert(
@@ -189,7 +190,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
                 }))
                 .layer(RequestBodyLimitLayer::new(1_048_576))
                 .layer(TimeoutLayer::new(std::time::Duration::from_secs(30)))
-                .concurrency_limit(8)
+                .concurrency_limit(8),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -204,7 +205,8 @@ async fn content_type_middleware(
     next: Next,
 ) -> Response {
     if req.method() == axum::http::Method::POST {
-        let content_type = req.headers()
+        let content_type = req
+            .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
@@ -217,10 +219,7 @@ async fn content_type_middleware(
 
 /// Resolve agent_id from X-Agent-Id header or default_agent_id.
 #[allow(clippy::result_large_err)]
-fn resolve_agent_id(
-    headers: &axum::http::HeaderMap,
-    state: &AppState,
-) -> Result<String, Response> {
+fn resolve_agent_id(headers: &axum::http::HeaderMap, state: &AppState) -> Result<String, Response> {
     match headers.get("x-agent-id") {
         Some(val) => {
             let agent_id = val.to_str().map_err(|_| {
@@ -258,7 +257,9 @@ fn check_rate_limit(state: &AppState, agent_id: &str) -> bool {
     // full DoS. The rate-limiter state is advisory per-window, not a security
     // boundary — accepting a potentially-inconsistent window start is strictly
     // safer than panicking.
-    let mut rl = limiter.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut rl = limiter
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = Instant::now();
     let elapsed = now.duration_since(rl.window_start);
 
@@ -325,34 +326,39 @@ async fn handle_version() -> impl IntoResponse {
     }))
 }
 
-async fn handle_status(
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
+async fn handle_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let uptime = state.start_time.elapsed().as_secs();
 
     // Per-agent capacity status
     let mut agents_status = serde_json::Map::new();
     for agent_id in state.agent_registry.agent_ids() {
         if let Some(auth) = state.agent_registry.get(agent_id) {
-            agents_status.insert(agent_id.to_string(), json!({
-                "capacity_used": auth.capacity_used(),
-                "capacity_max": auth.capacity_max(),
-                "capacity_remaining": auth.capacity_max().saturating_sub(auth.capacity_used()),
-            }));
+            agents_status.insert(
+                agent_id.to_string(),
+                json!({
+                    "capacity_used": auth.capacity_used(),
+                    "capacity_max": auth.capacity_max(),
+                    "capacity_remaining": auth.capacity_max().saturating_sub(auth.capacity_used()),
+                }),
+            );
         }
     }
 
     // Domain counters
     let mut domains = serde_json::Map::new();
     for (domain_id, policy) in &state.config.domain_policies {
-        let count = state.domain_counters
+        let count = state
+            .domain_counters
             .get(domain_id)
             .map(|c| c.load(Ordering::Relaxed))
             .unwrap_or(0);
-        domains.insert(domain_id.clone(), json!({
-            "enabled": policy.enabled,
-            "actions_count": count,
-        }));
+        domains.insert(
+            domain_id.clone(),
+            json!({
+                "enabled": policy.enabled,
+                "actions_count": count,
+            }),
+        );
     }
 
     Json(json!({
@@ -379,18 +385,18 @@ async fn handle_manifest(
                 StatusCode::OK,
                 [("x-safa-policy-hash", hash)],
                 Json(serde_json::to_value(&manifest).unwrap()),
-            ).into_response()
+            )
+                .into_response()
         }
-        None => {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "status": "error",
-                    "error_class": "unknown_agent",
-                    "message": format!("no manifest for agent: {}", agent_id),
-                })),
-            ).into_response()
-        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "status": "error",
+                "error_class": "unknown_agent",
+                "message": format!("no manifest for agent: {}", agent_id),
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -402,23 +408,21 @@ async fn handle_proof(
     axum::extract::Path(request_id): axum::extract::Path<String>,
 ) -> Response {
     match state.proof_store.get(&request_id) {
-        Some(record) => {
-            (
-                StatusCode::OK,
-                [("x-safa-policy-hash", record.manifest_hash.clone())],
-                Json(serde_json::to_value(&record).unwrap()),
-            ).into_response()
-        }
-        None => {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "status": "error",
-                    "error_class": "proof_not_found",
-                    "message": format!("no proof record for request_id: {}", request_id),
-                })),
-            ).into_response()
-        }
+        Some(record) => (
+            StatusCode::OK,
+            [("x-safa-policy-hash", record.manifest_hash.clone())],
+            Json(serde_json::to_value(&record).unwrap()),
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "status": "error",
+                "error_class": "proof_not_found",
+                "message": format!("no proof record for request_id: {}", request_id),
+            })),
+        )
+            .into_response(),
     }
 }
 
@@ -438,9 +442,11 @@ async fn handle_action(
     // 0.5 P3: Identity binding — verify HMAC if agent has a secret configured
     if let Some(agent_config) = state.config.agents.get(&agent_id) {
         if let Some(ref secret) = agent_config.secret {
-            let timestamp_str = headers.get("x-agent-timestamp")
+            let timestamp_str = headers
+                .get("x-agent-timestamp")
                 .and_then(|v| v.to_str().ok());
-            let signature_hex = headers.get("x-agent-signature")
+            let signature_hex = headers
+                .get("x-agent-signature")
                 .and_then(|v| v.to_str().ok());
 
             let now_secs = std::time::SystemTime::now()
@@ -463,7 +469,8 @@ async fn handle_action(
                         "error_class": "identity_verification_failed",
                         "message": e.to_string(),
                     })),
-                ).into_response();
+                )
+                    .into_response();
             }
 
             identity_replay_headers = Some((
@@ -477,13 +484,17 @@ async fn handle_action(
     let idem_key_str = match headers.get("idempotency-key") {
         Some(val) => match val.to_str() {
             Ok(s) => s.to_string(),
-            Err(_) => return ama_error_response(AmaError::BadRequest {
-                message: "Idempotency-Key header is not valid ASCII".into(),
-            }),
+            Err(_) => {
+                return ama_error_response(AmaError::BadRequest {
+                    message: "Idempotency-Key header is not valid ASCII".into(),
+                })
+            }
         },
-        None => return ama_error_response(AmaError::BadRequest {
-            message: "missing Idempotency-Key header".into(),
-        }),
+        None => {
+            return ama_error_response(AmaError::BadRequest {
+                message: "missing Idempotency-Key header".into(),
+            })
+        }
     };
 
     // 2. Validate UUID v4 format
@@ -496,13 +507,9 @@ async fn handle_action(
     // under a different Idempotency-Key. Same envelope + same key is
     // treated as a legitimate retry and falls through to idempotency.
     if let Some((timestamp_str, signature_hex)) = &identity_replay_headers {
-        if let Err(resp) = check_signed_replay(
-            &state,
-            &agent_id,
-            timestamp_str,
-            signature_hex,
-            idem_key,
-        ) {
+        if let Err(resp) =
+            check_signed_replay(&state, &agent_id, timestamp_str, signature_hex, idem_key)
+        {
             return resp;
         }
     }
@@ -522,7 +529,8 @@ async fn handle_action(
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/json")],
                 cached_response,
-            ).into_response();
+            )
+                .into_response();
         }
         IdempotencyStatus::InFlight => {
             return ama_error_response(AmaError::Conflict {
@@ -533,9 +541,12 @@ async fn handle_action(
             state.idempotency_cache.remove(&idem_key);
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({"status": "error", "error_class": "service_unavailable",
-                    "message": "idempotency cache full — fail-closed"})),
-            ).into_response();
+                Json(
+                    json!({"status": "error", "error_class": "service_unavailable",
+                    "message": "idempotency cache full — fail-closed"}),
+                ),
+            )
+                .into_response();
         }
         IdempotencyStatus::New => {
             // Continue processing
@@ -553,10 +564,9 @@ async fn handle_action(
                 "error_class": "bad_request",
                 "message": format!("invalid JSON: {}", e),
             });
-            state.idempotency_cache.complete(
-                idem_key,
-                serde_json::to_string(&error_response).unwrap(),
-            );
+            state
+                .idempotency_cache
+                .complete(idem_key, serde_json::to_string(&error_response).unwrap());
             return (StatusCode::BAD_REQUEST, Json(error_response)).into_response();
         }
     };
@@ -586,60 +596,63 @@ async fn handle_action(
         action_id.clone(),
         &state.session_id.to_string(),
         Some(&agent_id),
-    ).await;
+    )
+    .await;
 
     // 7. Build response and cache
     //    P3: Include X-Safa-Policy-Hash header for Proof-of-Constraint
     //    The manifest hash embeds the full policy bundle (domains + intents +
     //    allowlist) so external verifiers see a different hash whenever the
     //    effective policy surface changes — not just per-agent caps.
-    let policy_hash = state.config.agents.get(&agent_id)
+    let policy_hash = state
+        .config
+        .agents
+        .get(&agent_id)
         .map(|ac| {
             let bundle_hash = state.config.boot_hashes.policy_bundle_hash();
-            PublicManifest::from_agent_config(ac, &bundle_hash).hash().to_string()
+            PublicManifest::from_agent_config(ac, &bundle_hash)
+                .hash()
+                .to_string()
         })
         .unwrap_or_default();
 
     // P3: Store proof record for Proof-of-Constraint endpoint
-    let verdict_str = match &result {
-        Ok(_) => "AUTHORIZED",
-        Err(_) => "IMPOSSIBLE",
+    let verdict = match &result {
+        Ok(_) => ProofVerdict::Authorized,
+        Err(error) => ProofVerdict::from_error(error),
     };
-    let timestamp_epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
     state.proof_store.insert(safa_core::audit::ProofRecord {
         request_id: action_id.clone(),
         agent_id: agent_id.clone(),
         action: action_name.clone(),
-        verdict: verdict_str.to_string(),
+        verdict,
         manifest_hash: policy_hash.clone(),
-        timestamp: timestamp_epoch.to_string(),
+        timestamp: timestamp_now(),
     });
 
     match result {
         Ok(response) => {
             let response_json = serde_json::to_string(&response).unwrap();
 
-            if let Ok(mapping) = safa_core::mapper::map_action(
-                &action_name, magnitude, &state.config,
-            ) {
+            if let Ok(mapping) =
+                safa_core::mapper::map_action(&action_name, magnitude, &state.config)
+            {
                 increment_domain_counter(&state, &mapping.domain_id);
             }
 
-            state.idempotency_cache.complete(idem_key, response_json.clone());
+            state
+                .idempotency_cache
+                .complete(idem_key, response_json.clone());
 
             let mut resp = (
                 StatusCode::OK,
                 [(header::CONTENT_TYPE, "application/json")],
                 response_json,
-            ).into_response();
+            )
+                .into_response();
             if !policy_hash.is_empty() {
-                resp.headers_mut().insert(
-                    "x-safa-policy-hash",
-                    policy_hash.parse().unwrap(),
-                );
+                resp.headers_mut()
+                    .insert("x-safa-policy-hash", policy_hash.parse().unwrap());
             }
             resp
         }
@@ -647,28 +660,15 @@ async fn handle_action(
             // P1 Model A: commit error as terminal result, do not remove.
             // All terminal outcomes (denial, timeout, failure) go to DONE.
             // Retry with same key will replay the cached error response.
-            //
-            // Build JSON for caching BEFORE consuming `e` with ama_error_response().
-            let cached_json = match &e {
-                AmaError::Impossible => json!({"status": "impossible"}),
-                AmaError::BadRequest { message } => {
-                    json!({"status": "error", "error_class": "bad_request", "message": message})
-                }
-                AmaError::Validation { error_class, message } => {
-                    json!({"status": "error", "error_class": error_class, "message": message})
-                }
-                AmaError::ServiceUnavailable { message } => {
-                    json!({"status": "error", "error_class": "service_unavailable", "message": message})
-                }
-                other => {
-                    json!({"status": "error", "message": other.to_string()})
-                }
-            };
-            state.idempotency_cache.complete(
-                idem_key,
-                serde_json::to_string(&cached_json).unwrap(),
-            );
-            ama_error_response(e)
+            let (status, mut cached_json) = e.http_status_and_body();
+            cached_json
+                .as_object_mut()
+                .expect("AmaError bodies must be JSON objects")
+                .insert("action_id".into(), json!(action_id));
+            state
+                .idempotency_cache
+                .complete(idem_key, serde_json::to_string(&cached_json).unwrap());
+            (StatusCode::from_u16(status).unwrap(), Json(cached_json)).into_response()
         }
     }
 }
@@ -678,8 +678,8 @@ pub async fn shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
         let ctrl_c = tokio::signal::ctrl_c();
         tokio::select! {
             _ = sigterm.recv() => {
@@ -715,27 +715,33 @@ pub struct TestAgentSpec {
 pub async fn test_server_with_agent_specs(
     agent_specs: Vec<TestAgentSpec>,
 ) -> axum_test::TestServer {
-    use safa_core::config::{AmaConfig, AgentConfig, DomainPolicy, DomainMapping, BootHashes};
+    use safa_core::config::{AgentConfig, AmaConfig, BootHashes, DomainMapping, DomainPolicy};
 
     let workspace = std::env::temp_dir().join(format!("safa-test-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&workspace).unwrap();
 
     let base_domain_policies = {
         let mut dp = HashMap::new();
-        dp.insert("fs.write.workspace".into(), DomainPolicy {
-            enabled: true,
-            max_magnitude_per_action: 1000,
-        });
+        dp.insert(
+            "fs.write.workspace".into(),
+            DomainPolicy {
+                enabled: true,
+                max_magnitude_per_action: 1000,
+            },
+        );
         dp
     };
 
     let mut domain_mappings = HashMap::new();
-    domain_mappings.insert("file_write".into(), DomainMapping {
-        domain_id: "fs.write.workspace".into(),
-        max_payload_bytes: Some(1_048_576),
-        validator: None,
-        requires_intent: false,
-    });
+    domain_mappings.insert(
+        "file_write".into(),
+        DomainMapping {
+            domain_id: "fs.write.workspace".into(),
+            max_payload_bytes: Some(1_048_576),
+            validator: None,
+            requires_intent: false,
+        },
+    );
 
     let mut agents = HashMap::new();
     let mut global_max_capacity: u64 = 0;
@@ -793,13 +799,16 @@ pub async fn test_server_with_agent_specs(
 pub async fn test_server_multiagent(
     agent_specs: Vec<(&str, u64, u64)>, // (agent_id, capacity, rate_limit_per_window)
 ) -> axum_test::TestServer {
-    let specs = agent_specs.into_iter().map(|(agent_id, capacity, rate_limit)| TestAgentSpec {
-        agent_id: agent_id.to_string(),
-        max_capacity: capacity,
-        rate_limit_per_window: rate_limit,
-        rate_limit_window_secs: 60,
-        secret: None,
-    }).collect();
+    let specs = agent_specs
+        .into_iter()
+        .map(|(agent_id, capacity, rate_limit)| TestAgentSpec {
+            agent_id: agent_id.to_string(),
+            max_capacity: capacity,
+            rate_limit_per_window: rate_limit,
+            rate_limit_window_secs: 60,
+            secret: None,
+        })
+        .collect();
     test_server_with_agent_specs(specs).await
 }
 

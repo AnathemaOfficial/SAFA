@@ -1,6 +1,6 @@
 use safa_core::config::*;
-use tempfile::TempDir;
 use std::fs;
+use tempfile::TempDir;
 
 #[test]
 fn loads_valid_config() {
@@ -66,7 +66,9 @@ max_magnitude_per_action = 500
     assert_eq!(agent_config.rate_limit_per_window, 30);
     assert_eq!(agent_config.rate_limit_window_secs, 60);
     assert_eq!(agent_config.domain_policies.len(), 2);
-    assert!(agent_config.domain_policies.contains_key("fs.write.workspace"));
+    assert!(agent_config
+        .domain_policies
+        .contains_key("fs.write.workspace"));
 }
 
 #[test]
@@ -137,7 +139,9 @@ fn test_load_agent_configs_from_directory() {
     let agents_dir = dir.path().join("agents");
     fs::create_dir(&agents_dir).unwrap();
 
-    fs::write(agents_dir.join("agent_a.toml"), r#"
+    fs::write(
+        agents_dir.join("agent_a.toml"),
+        r#"
 [agent]
 agent_id = "agent-a"
 max_capacity = 5000
@@ -145,9 +149,13 @@ max_capacity = 5000
 [agent.domains.fs_write_workspace]
 enabled = true
 max_magnitude_per_action = 100
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(agents_dir.join("agent_b.toml"), r#"
+    fs::write(
+        agents_dir.join("agent_b.toml"),
+        r#"
 [agent]
 agent_id = "agent-b"
 max_capacity = 3000
@@ -155,7 +163,9 @@ max_capacity = 3000
 [agent.domains.fs_read_workspace]
 enabled = true
 max_magnitude_per_action = 200
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let agents = safa_core::config::load_agent_configs(&agents_dir).unwrap();
     assert_eq!(agents.len(), 2);
@@ -169,17 +179,25 @@ fn test_load_agent_configs_rejects_duplicate_agent_id() {
     let agents_dir = dir.path().join("agents");
     fs::create_dir(&agents_dir).unwrap();
 
-    fs::write(agents_dir.join("one.toml"), r#"
+    fs::write(
+        agents_dir.join("one.toml"),
+        r#"
 [agent]
 agent_id = "same-id"
 max_capacity = 5000
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(agents_dir.join("two.toml"), r#"
+    fs::write(
+        agents_dir.join("two.toml"),
+        r#"
 [agent]
 agent_id = "same-id"
 max_capacity = 3000
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     assert!(safa_core::config::load_agent_configs(&agents_dir).is_err());
 }
@@ -222,7 +240,10 @@ fn loads_agent_configs_from_agents_dir() {
 
     // Write config.toml WITHOUT slime.max_capacity and domains
     let workspace_root_escaped = ws.to_str().unwrap().replace('\\', "\\\\");
-    fs::write(dir.path().join("config.toml"), format!(r#"
+    fs::write(
+        dir.path().join("config.toml"),
+        format!(
+            r#"
 [safa]
 workspace_root = "{workspace_root_escaped}"
 bind_host = "127.0.0.1"
@@ -230,10 +251,15 @@ bind_port = 8787
 
 [slime]
 mode = "embedded"
-"#)).unwrap();
+"#
+        ),
+    )
+    .unwrap();
 
     // Write agent config
-    fs::write(agents_dir.join("openclaw.toml"), r#"
+    fs::write(
+        agents_dir.join("openclaw.toml"),
+        r#"
 [agent]
 agent_id = "openclaw"
 max_capacity = 8000
@@ -255,10 +281,14 @@ max_magnitude_per_action = 50
 [agent.domains.net_out_http]
 enabled = true
 max_magnitude_per_action = 200
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     // Write other config files
-    fs::write(dir.path().join("domains.toml"), r#"
+    fs::write(
+        dir.path().join("domains.toml"),
+        r#"
 [meta]
 schema_version = "safa-domains-v1"
 
@@ -279,17 +309,27 @@ requires_intent = true
 domain_id = "net.out.http"
 max_payload_bytes = 262144
 validator = "allowlisted_url"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(dir.path().join("intents.toml"), r#"
+    fs::write(
+        dir.path().join("intents.toml"),
+        r#"
 [meta]
 schema_version = "safa-intents-v1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(dir.path().join("allowlist.toml"), r#"
+    fs::write(
+        dir.path().join("allowlist.toml"),
+        r#"
 [meta]
 schema_version = "safa-allowlist-v1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let config = AmaConfig::load(dir.path()).unwrap();
     assert_eq!(config.agents.len(), 1);
@@ -304,7 +344,10 @@ schema_version = "safa-allowlist-v1"
 fn write_test_configs(dir: &std::path::Path, workspace_root: &str) {
     // On Windows, backslashes in TOML strings must be escaped.
     let workspace_root_escaped = workspace_root.replace('\\', "\\\\");
-    fs::write(dir.join("config.toml"), format!(r#"
+    fs::write(
+        dir.join("config.toml"),
+        format!(
+            r#"
 [safa]
 workspace_root = "{workspace_root_escaped}"
 bind_host = "127.0.0.1"
@@ -329,9 +372,14 @@ max_magnitude_per_action = 50
 [slime.domains.net_out_http]
 enabled = true
 max_magnitude_per_action = 200
-"#)).unwrap();
+"#
+        ),
+    )
+    .unwrap();
 
-    fs::write(dir.join("domains.toml"), r#"
+    fs::write(
+        dir.join("domains.toml"),
+        r#"
 [meta]
 schema_version = "safa-domains-v1"
 max_magnitude_claim = 1000
@@ -353,15 +401,25 @@ requires_intent = true
 domain_id = "net.out.http"
 max_payload_bytes = 262144
 validator = "allowlisted_url"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(dir.join("intents.toml"), r#"
+    fs::write(
+        dir.join("intents.toml"),
+        r#"
 [meta]
 schema_version = "safa-intents-v1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(dir.join("allowlist.toml"), r#"
+    fs::write(
+        dir.join("allowlist.toml"),
+        r#"
 [meta]
 schema_version = "safa-allowlist-v1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 }

@@ -9,7 +9,7 @@
 // This prevents replay attacks while allowing reasonable clock skew.
 
 use hmac::{Hmac, Mac};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -38,7 +38,11 @@ impl std::fmt::Display for IdentityError {
         match self {
             Self::MissingTimestamp => write!(f, "missing X-Agent-Timestamp header"),
             Self::InvalidTimestamp => write!(f, "X-Agent-Timestamp is not a valid unix timestamp"),
-            Self::ExpiredTimestamp => write!(f, "X-Agent-Timestamp outside acceptable window (+-{}s)", TIMESTAMP_TOLERANCE_SECS),
+            Self::ExpiredTimestamp => write!(
+                f,
+                "X-Agent-Timestamp outside acceptable window (+-{}s)",
+                TIMESTAMP_TOLERANCE_SECS
+            ),
             Self::MissingSignature => write!(f, "missing X-Agent-Signature header"),
             Self::InvalidSignatureFormat => write!(f, "X-Agent-Signature is not valid hex"),
             Self::SignatureMismatch => write!(f, "HMAC signature verification failed"),
@@ -65,8 +69,8 @@ pub fn compute_signature(secret: &str, agent_id: &str, timestamp: &str, body: &[
     let body_sha = body_hash(body);
     let message = build_signing_message(agent_id, timestamp, &body_sha);
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(message.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
@@ -108,15 +112,15 @@ pub fn verify_identity(
     let signature_hex = signature_hex.ok_or(IdentityError::MissingSignature)?;
 
     // 4. Decode hex signature
-    let provided_sig = hex::decode(signature_hex)
-        .map_err(|_| IdentityError::InvalidSignatureFormat)?;
+    let provided_sig =
+        hex::decode(signature_hex).map_err(|_| IdentityError::InvalidSignatureFormat)?;
 
     // 5. Compute expected HMAC
     let body_sha = body_hash(body);
     let message = build_signing_message(agent_id, timestamp_str, &body_sha);
 
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC can take key of any size");
+    let mut mac =
+        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(message.as_bytes());
 
     // 6. Constant-time comparison (via hmac crate's verify_slice)
@@ -144,7 +148,12 @@ mod tests {
         let ts = now().to_string();
         let sig = compute_signature(TEST_SECRET, TEST_AGENT, &ts, TEST_BODY);
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&ts), Some(&sig), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some(&ts),
+            Some(&sig),
+            TEST_BODY,
+            now(),
         );
         assert!(result.is_ok());
     }
@@ -152,9 +161,19 @@ mod tests {
     #[test]
     fn test_wrong_secret() {
         let ts = now().to_string();
-        let sig = compute_signature("wrong-secret-that-is-long-enough!", TEST_AGENT, &ts, TEST_BODY);
+        let sig = compute_signature(
+            "wrong-secret-that-is-long-enough!",
+            TEST_AGENT,
+            &ts,
+            TEST_BODY,
+        );
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&ts), Some(&sig), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some(&ts),
+            Some(&sig),
+            TEST_BODY,
+            now(),
         );
         assert_eq!(result, Err(IdentityError::SignatureMismatch));
     }
@@ -165,7 +184,12 @@ mod tests {
         let sig = compute_signature(TEST_SECRET, TEST_AGENT, &ts, TEST_BODY);
         let tampered = b"{\"action\":\"shell_exec\",\"target\":\"rm -rf /\",\"magnitude\":1}";
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&ts), Some(&sig), tampered, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some(&ts),
+            Some(&sig),
+            tampered,
+            now(),
         );
         assert_eq!(result, Err(IdentityError::SignatureMismatch));
     }
@@ -175,7 +199,12 @@ mod tests {
         let old_ts = (now() - TIMESTAMP_TOLERANCE_SECS - 10).to_string();
         let sig = compute_signature(TEST_SECRET, TEST_AGENT, &old_ts, TEST_BODY);
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&old_ts), Some(&sig), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some(&old_ts),
+            Some(&sig),
+            TEST_BODY,
+            now(),
         );
         assert_eq!(result, Err(IdentityError::ExpiredTimestamp));
     }
@@ -185,7 +214,12 @@ mod tests {
         let future_ts = (now() + TIMESTAMP_TOLERANCE_SECS + 10).to_string();
         let sig = compute_signature(TEST_SECRET, TEST_AGENT, &future_ts, TEST_BODY);
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&future_ts), Some(&sig), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some(&future_ts),
+            Some(&sig),
+            TEST_BODY,
+            now(),
         );
         assert_eq!(result, Err(IdentityError::ExpiredTimestamp));
     }
@@ -193,7 +227,12 @@ mod tests {
     #[test]
     fn test_missing_timestamp() {
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, None, Some("deadbeef"), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            None,
+            Some("deadbeef"),
+            TEST_BODY,
+            now(),
         );
         assert_eq!(result, Err(IdentityError::MissingTimestamp));
     }
@@ -201,9 +240,7 @@ mod tests {
     #[test]
     fn test_missing_signature() {
         let ts = now().to_string();
-        let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&ts), None, TEST_BODY, now(),
-        );
+        let result = verify_identity(TEST_SECRET, TEST_AGENT, Some(&ts), None, TEST_BODY, now());
         assert_eq!(result, Err(IdentityError::MissingSignature));
     }
 
@@ -211,7 +248,12 @@ mod tests {
     fn test_invalid_hex_signature() {
         let ts = now().to_string();
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&ts), Some("not-hex-zzzz"), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some(&ts),
+            Some("not-hex-zzzz"),
+            TEST_BODY,
+            now(),
         );
         assert_eq!(result, Err(IdentityError::InvalidSignatureFormat));
     }
@@ -219,7 +261,12 @@ mod tests {
     #[test]
     fn test_invalid_timestamp_format() {
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some("not-a-number"), Some("deadbeef"), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some("not-a-number"),
+            Some("deadbeef"),
+            TEST_BODY,
+            now(),
         );
         assert_eq!(result, Err(IdentityError::InvalidTimestamp));
     }
@@ -245,7 +292,12 @@ mod tests {
         let boundary_ts = (now() - TIMESTAMP_TOLERANCE_SECS).to_string();
         let sig = compute_signature(TEST_SECRET, TEST_AGENT, &boundary_ts, TEST_BODY);
         let result = verify_identity(
-            TEST_SECRET, TEST_AGENT, Some(&boundary_ts), Some(&sig), TEST_BODY, now(),
+            TEST_SECRET,
+            TEST_AGENT,
+            Some(&boundary_ts),
+            Some(&sig),
+            TEST_BODY,
+            now(),
         );
         assert!(result.is_ok());
     }

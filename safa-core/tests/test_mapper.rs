@@ -1,7 +1,7 @@
-use safa_core::mapper::*;
 use safa_core::config::*;
-use tempfile::TempDir;
+use safa_core::mapper::*;
 use std::fs;
+use tempfile::TempDir;
 
 #[test]
 fn maps_file_write_to_domain() {
@@ -40,7 +40,10 @@ fn test_config() -> AmaConfig {
 }
 
 fn write_test_configs(dir: &std::path::Path, workspace_root: &str) {
-    fs::write(dir.join("config.toml"), format!(r#"
+    fs::write(
+        dir.join("config.toml"),
+        format!(
+            r#"
 [safa]
 workspace_root = "{workspace_root}"
 bind_host = "127.0.0.1"
@@ -65,9 +68,14 @@ max_magnitude_per_action = 50
 [slime.domains.net_out_http]
 enabled = true
 max_magnitude_per_action = 200
-"#)).unwrap();
+"#
+        ),
+    )
+    .unwrap();
 
-    fs::write(dir.join("domains.toml"), r#"
+    fs::write(
+        dir.join("domains.toml"),
+        r#"
 [meta]
 schema_version = "safa-domains-v1"
 max_magnitude_claim = 1000
@@ -89,15 +97,25 @@ requires_intent = true
 domain_id = "net.out.http"
 max_payload_bytes = 262144
 validator = "allowlisted_url"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(dir.join("intents.toml"), r#"
+    fs::write(
+        dir.join("intents.toml"),
+        r#"
 [meta]
 schema_version = "safa-intents-v1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
-    fs::write(dir.join("allowlist.toml"), r#"
+    fs::write(
+        dir.join("allowlist.toml"),
+        r#"
 [meta]
 schema_version = "safa-allowlist-v1"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 }

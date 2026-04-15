@@ -14,6 +14,27 @@ pub struct ActionRequest {
     pub args: Option<Vec<String>>,
 }
 
+pub fn validate_adapter(adapter: &str) -> Result<(), AmaError> {
+    if adapter.is_empty() || adapter.len() > 64 {
+        return Err(AmaError::Validation {
+            error_class: "invalid_adapter".into(),
+            message: "adapter must be 1-64 chars of [A-Za-z0-9_-]".into(),
+        });
+    }
+
+    if !adapter
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err(AmaError::Validation {
+            error_class: "invalid_adapter".into(),
+            message: "adapter must be 1-64 chars of [A-Za-z0-9_-]".into(),
+        });
+    }
+
+    Ok(())
+}
+
 pub fn validate_magnitude(magnitude: u64) -> Result<(), AmaError> {
     if !(1..=1000).contains(&magnitude) {
         return Err(AmaError::Validation {

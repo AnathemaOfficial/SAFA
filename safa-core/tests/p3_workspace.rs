@@ -33,11 +33,8 @@ fn agent_can_access_own_workspace() {
 fn agent_cannot_access_other_agent_workspace_via_traversal() {
     let ws = setup_workspace();
     // agent-alpha tries to access agent-beta's files via ../agent-beta/
-    let result = WorkspacePath::new_with_agent(
-        "../agent-beta/data.txt",
-        ws.path(),
-        Some("agent-alpha"),
-    );
+    let result =
+        WorkspacePath::new_with_agent("../agent-beta/data.txt", ws.path(), Some("agent-alpha"));
     assert!(result.is_err());
 }
 
@@ -45,11 +42,7 @@ fn agent_cannot_access_other_agent_workspace_via_traversal() {
 fn agent_cannot_access_root_workspace_via_traversal() {
     let ws = setup_workspace();
     // agent-alpha tries to escape to the root workspace
-    let result = WorkspacePath::new_with_agent(
-        "../secret.txt",
-        ws.path(),
-        Some("agent-alpha"),
-    );
+    let result = WorkspacePath::new_with_agent("../secret.txt", ws.path(), Some("agent-alpha"));
     assert!(result.is_err());
 }
 
@@ -57,11 +50,7 @@ fn agent_cannot_access_root_workspace_via_traversal() {
 fn agent_workspace_new_file_confined() {
     let ws = setup_workspace();
     // Creating a new file should stay in agent's workspace
-    let result = WorkspacePath::new_with_agent(
-        "new_file.txt",
-        ws.path(),
-        Some("agent-alpha"),
-    );
+    let result = WorkspacePath::new_with_agent("new_file.txt", ws.path(), Some("agent-alpha"));
     assert!(result.is_ok());
     let path = result.unwrap();
     // Canonical path must contain the agent's workspace segment
@@ -95,11 +84,8 @@ mod symlink_tests {
         symlink(ws.path().join("agent-beta"), &escape_link).unwrap();
 
         // agent-alpha tries to follow the symlink to agent-beta
-        let result = WorkspacePath::new_with_agent(
-            "escape/data.txt",
-            ws.path(),
-            Some("agent-alpha"),
-        );
+        let result =
+            WorkspacePath::new_with_agent("escape/data.txt", ws.path(), Some("agent-alpha"));
         assert!(result.is_err(), "symlink escape should be detected");
     }
 
@@ -110,11 +96,8 @@ mod symlink_tests {
         let parent_link = ws.path().join("agent-alpha/parent");
         symlink(ws.path(), &parent_link).unwrap();
 
-        let result = WorkspacePath::new_with_agent(
-            "parent/secret.txt",
-            ws.path(),
-            Some("agent-alpha"),
-        );
+        let result =
+            WorkspacePath::new_with_agent("parent/secret.txt", ws.path(), Some("agent-alpha"));
         assert!(result.is_err(), "symlink to parent should be detected");
     }
 
@@ -132,11 +115,7 @@ mod symlink_tests {
         .unwrap();
 
         // Following a symlink within the same workspace is fine
-        let result = WorkspacePath::new_with_agent(
-            "link.txt",
-            ws.path(),
-            Some("agent-alpha"),
-        );
+        let result = WorkspacePath::new_with_agent("link.txt", ws.path(), Some("agent-alpha"));
         assert!(result.is_ok(), "internal symlink should be allowed");
     }
 }

@@ -68,7 +68,10 @@ fn take_stderr(child: &mut Child) -> String {
 
 fn main() -> DynResult<()> {
     if TcpStream::connect("127.0.0.1:8080").is_ok() {
-        return Err("127.0.0.1:8080 is already in use; stop the existing service before running this demo".into());
+        return Err(
+            "127.0.0.1:8080 is already in use; stop the existing service before running this demo"
+                .into(),
+        );
     }
 
     let slime_runner_dir = slime_runner_dir()?;
@@ -116,7 +119,11 @@ fn main() -> DynResult<()> {
 
     let effect = fs::read(&egress_file)?;
     if effect.len() != 32 {
-        return Err(format!("expected one 32-byte authorized effect, got {} bytes", effect.len()).into());
+        return Err(format!(
+            "expected one 32-byte authorized effect, got {} bytes",
+            effect.len()
+        )
+        .into());
     }
 
     let observed_domain = u64::from_le_bytes(effect[0..8].try_into()?);
@@ -143,8 +150,14 @@ fn main() -> DynResult<()> {
     }
 
     println!("SAFA -> SLIME public proof passed");
-    println!("allowed handoff: domain={}, magnitude={}", allowed_handoff.0, allowed_handoff.1);
-    println!("denied handoff: domain={}, magnitude={}", denied_handoff.0, denied_handoff.1);
+    println!(
+        "allowed handoff: domain={}, magnitude={}",
+        allowed_handoff.0, allowed_handoff.1
+    );
+    println!(
+        "denied handoff: domain={}, magnitude={}",
+        denied_handoff.0, denied_handoff.1
+    );
     println!("egress bytes written: {}", final_effect.len());
     println!("slime runner dir: {}", slime_runner_dir.display());
     println!("proof root: {}", temp_root.display());

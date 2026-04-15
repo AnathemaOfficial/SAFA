@@ -1,7 +1,12 @@
 use safa_core::pipeline::validate_field_exclusivity;
 use safa_core::schema::ActionRequest;
 
-fn make_request(action: &str, payload: Option<String>, args: Option<Vec<String>>, method: Option<String>) -> ActionRequest {
+fn make_request(
+    action: &str,
+    payload: Option<String>,
+    args: Option<Vec<String>>,
+    method: Option<String>,
+) -> ActionRequest {
     ActionRequest {
         adapter: "test".into(),
         action: action.into(),
@@ -22,7 +27,12 @@ fn file_write_requires_payload() {
 
 #[test]
 fn file_write_rejects_args() {
-    let req = make_request("file_write", Some("data".into()), Some(vec!["x".into()]), None);
+    let req = make_request(
+        "file_write",
+        Some("data".into()),
+        Some(vec!["x".into()]),
+        None,
+    );
     assert!(validate_field_exclusivity(&req).is_err());
 }
 
@@ -52,13 +62,23 @@ fn shell_exec_requires_args() {
 
 #[test]
 fn shell_exec_rejects_payload() {
-    let req = make_request("shell_exec", Some("data".into()), Some(vec!["x".into()]), None);
+    let req = make_request(
+        "shell_exec",
+        Some("data".into()),
+        Some(vec!["x".into()]),
+        None,
+    );
     assert!(validate_field_exclusivity(&req).is_err());
 }
 
 #[test]
 fn http_request_rejects_args() {
-    let req = make_request("http_request", None, Some(vec!["x".into()]), Some("GET".into()));
+    let req = make_request(
+        "http_request",
+        None,
+        Some(vec!["x".into()]),
+        Some("GET".into()),
+    );
     assert!(validate_field_exclusivity(&req).is_err());
 }
 

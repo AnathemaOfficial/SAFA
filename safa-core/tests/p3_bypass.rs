@@ -3,10 +3,10 @@
 // Adversarial tests that verify SAFA cannot be circumvented.
 // Every test represents a potential attack vector.
 
+use safa_core::config::{AgentConfig, DomainPolicy};
 use safa_core::identity::{compute_signature, verify_identity};
 use safa_core::manifest::PublicManifest;
 use safa_core::newtypes::WorkspacePath;
-use safa_core::config::{AgentConfig, DomainPolicy};
 use std::collections::HashMap;
 
 fn now() -> u64 {
@@ -49,7 +49,10 @@ fn bypass_identity_replay_expired() {
     let sig = compute_signature(secret, "agent", &old_ts, body);
 
     let result = verify_identity(secret, "agent", Some(&old_ts), Some(&sig), body, now());
-    assert!(result.is_err(), "replayed expired signature must be rejected");
+    assert!(
+        result.is_err(),
+        "replayed expired signature must be rejected"
+    );
 }
 
 #[test]
@@ -62,9 +65,7 @@ fn bypass_identity_body_tampering() {
     let ts = now().to_string();
     let sig = compute_signature(secret, "agent", &ts, original_body);
 
-    let result = verify_identity(
-        secret, "agent", Some(&ts), Some(&sig), tampered_body, now(),
-    );
+    let result = verify_identity(secret, "agent", Some(&ts), Some(&sig), tampered_body, now());
     assert!(result.is_err(), "tampered body must be detected");
 }
 
@@ -75,11 +76,7 @@ fn bypass_workspace_double_slash() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("agent")).unwrap();
 
-    let result = WorkspacePath::new_with_agent(
-        "foo//bar.txt",
-        dir.path(),
-        Some("agent"),
-    );
+    let result = WorkspacePath::new_with_agent("foo//bar.txt", dir.path(), Some("agent"));
     assert!(result.is_err(), "double slash path must be rejected");
 }
 
@@ -89,11 +86,7 @@ fn bypass_workspace_null_byte() {
     std::fs::create_dir_all(dir.path().join("agent")).unwrap();
 
     // Null bytes in paths can truncate on C-level APIs
-    let result = WorkspacePath::new_with_agent(
-        "data\0.txt",
-        dir.path(),
-        Some("agent"),
-    );
+    let result = WorkspacePath::new_with_agent("data\0.txt", dir.path(), Some("agent"));
     // std::path handles null bytes — should either error or be safe
     // The key invariant: path must stay in agent workspace
     if let Ok(path) = result {
@@ -108,11 +101,8 @@ fn bypass_workspace_dot_dot_encoded() {
     std::fs::create_dir_all(dir.path().join("agent")).unwrap();
 
     // Direct .. is caught, but what about tricky paths?
-    let result = WorkspacePath::new_with_agent(
-        "subdir/../../../etc/passwd",
-        dir.path(),
-        Some("agent"),
-    );
+    let result =
+        WorkspacePath::new_with_agent("subdir/../../../etc/passwd", dir.path(), Some("agent"));
     assert!(result.is_err(), "traversal via .. must be rejected");
 }
 
@@ -121,11 +111,7 @@ fn bypass_workspace_absolute_path() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("agent")).unwrap();
 
-    let result = WorkspacePath::new_with_agent(
-        "/etc/passwd",
-        dir.path(),
-        Some("agent"),
-    );
+    let result = WorkspacePath::new_with_agent("/etc/passwd", dir.path(), Some("agent"));
     assert!(result.is_err(), "absolute path must be rejected");
 }
 
@@ -134,11 +120,7 @@ fn bypass_workspace_windows_drive() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("agent")).unwrap();
 
-    let result = WorkspacePath::new_with_agent(
-        "C:\\Windows\\system32",
-        dir.path(),
-        Some("agent"),
-    );
+    let result = WorkspacePath::new_with_agent("C:\\Windows\\system32", dir.path(), Some("agent"));
     assert!(result.is_err(), "Windows drive path must be rejected");
 }
 
@@ -158,18 +140,27 @@ fn bypass_manifest_secret_not_leaked() {
     let manifest = PublicManifest::from_agent_config(&config, "test-bundle");
     let json = serde_json::to_string(&manifest).unwrap();
 
-    assert!(!json.contains("super-secret"), "secret must never appear in manifest JSON");
+    assert!(
+        !json.contains("super-secret"),
+        "secret must never appear in manifest JSON"
+    );
     assert!(!json.contains("key-that"), "secret fragments must not leak");
-    assert!(json.contains("\"identity_bound\":true"), "identity_bound flag must be present");
+    assert!(
+        json.contains("\"identity_bound\":true"),
+        "identity_bound flag must be present"
+    );
 }
 
 #[test]
 fn bypass_manifest_hash_tamper_detection() {
     let mut policies = HashMap::new();
-    policies.insert("fs.write.workspace".into(), DomainPolicy {
-        enabled: true,
-        max_magnitude_per_action: 1000,
-    });
+    policies.insert(
+        "fs.write.workspace".into(),
+        DomainPolicy {
+            enabled: true,
+            max_magnitude_per_action: 1000,
+        },
+    );
 
     let config_original = AgentConfig {
         agent_id: "agent".into(),
@@ -182,7 +173,10 @@ fn bypass_manifest_hash_tamper_detection() {
 
     // Tamper: change magnitude limit
     let mut policies_tampered = policies;
-    policies_tampered.get_mut("fs.write.workspace").unwrap().max_magnitude_per_action = 999_999;
+    policies_tampered
+        .get_mut("fs.write.workspace")
+        .unwrap()
+        .max_magnitude_per_action = 999_999;
 
     let config_tampered = AgentConfig {
         agent_id: "agent".into(),
@@ -193,10 +187,15 @@ fn bypass_manifest_hash_tamper_detection() {
         secret: None,
     };
 
-    let hash_original = PublicManifest::from_agent_config(&config_original, "test-bundle").manifest_hash;
-    let hash_tampered = PublicManifest::from_agent_config(&config_tampered, "test-bundle").manifest_hash;
+    let hash_original =
+        PublicManifest::from_agent_config(&config_original, "test-bundle").manifest_hash;
+    let hash_tampered =
+        PublicManifest::from_agent_config(&config_tampered, "test-bundle").manifest_hash;
 
-    assert_ne!(hash_original, hash_tampered, "tampered config must produce different hash");
+    assert_ne!(
+        hash_original, hash_tampered,
+        "tampered config must produce different hash"
+    );
 }
 
 #[test]
@@ -206,10 +205,13 @@ fn bypass_manifest_hash_tamper_detection_policy_bundle() {
     // the per-agent config stays identical. Without this, silent policy
     // drift would leave all manifests reporting the same hash.
     let mut policies = HashMap::new();
-    policies.insert("fs.write.workspace".into(), DomainPolicy {
-        enabled: true,
-        max_magnitude_per_action: 1000,
-    });
+    policies.insert(
+        "fs.write.workspace".into(),
+        DomainPolicy {
+            enabled: true,
+            max_magnitude_per_action: 1000,
+        },
+    );
 
     let config = AgentConfig {
         agent_id: "agent".into(),
@@ -223,5 +225,8 @@ fn bypass_manifest_hash_tamper_detection_policy_bundle() {
     let hash_bundle_a = PublicManifest::from_agent_config(&config, "bundle-hash-A").manifest_hash;
     let hash_bundle_b = PublicManifest::from_agent_config(&config, "bundle-hash-B").manifest_hash;
 
-    assert_ne!(hash_bundle_a, hash_bundle_b, "different bundle hash must produce different manifest hash");
+    assert_ne!(
+        hash_bundle_a, hash_bundle_b,
+        "different bundle hash must produce different manifest hash"
+    );
 }

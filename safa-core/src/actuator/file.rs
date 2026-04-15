@@ -32,9 +32,11 @@ pub fn file_write(
 
     // Verify target is regular file or doesn't exist
     if target.exists() {
-        let meta = target.symlink_metadata().map_err(|e| AmaError::ServiceUnavailable {
-            message: format!("cannot stat target: {}", e),
-        })?;
+        let meta = target
+            .symlink_metadata()
+            .map_err(|e| AmaError::ServiceUnavailable {
+                message: format!("cannot stat target: {}", e),
+            })?;
         if !meta.is_file() {
             return Err(AmaError::Validation {
                 error_class: "invalid_target".into(),
@@ -53,10 +55,11 @@ pub fn file_write(
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(parent, fs::Permissions::from_mode(0o755))
-                    .map_err(|e| AmaError::ServiceUnavailable {
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o755)).map_err(|e| {
+                    AmaError::ServiceUnavailable {
                         message: format!("cannot set dir permissions: {}", e),
-                    })?;
+                    }
+                })?;
             }
         }
     }
@@ -99,10 +102,7 @@ pub fn file_write(
 }
 
 /// Bounded file read with truncation.
-pub fn file_read(
-    path: &WorkspacePath,
-    max_bytes: usize,
-) -> Result<FileReadResult, AmaError> {
+pub fn file_read(path: &WorkspacePath, max_bytes: usize) -> Result<FileReadResult, AmaError> {
     let target = path.canonical();
 
     // Verify no symlinks in path
@@ -116,9 +116,11 @@ pub fn file_read(
     }
 
     // Must be regular file
-    let meta = target.symlink_metadata().map_err(|e| AmaError::ServiceUnavailable {
-        message: format!("cannot stat: {}", e),
-    })?;
+    let meta = target
+        .symlink_metadata()
+        .map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("cannot stat: {}", e),
+        })?;
     if !meta.is_file() {
         return Err(AmaError::Validation {
             error_class: "invalid_target".into(),
@@ -134,9 +136,10 @@ pub fn file_read(
     })?;
     let read_size = std::cmp::min(total_bytes as usize, max_bytes);
     let mut buf = vec![0u8; read_size];
-    file.read_exact(&mut buf).map_err(|e| AmaError::ServiceUnavailable {
-        message: format!("read error: {}", e),
-    })?;
+    file.read_exact(&mut buf)
+        .map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("read error: {}", e),
+        })?;
 
     // UTF-8 check (P0 is text-only)
     let content = String::from_utf8(buf).map_err(|_| AmaError::Validation {
@@ -163,9 +166,11 @@ fn verify_no_symlinks(path: &Path) -> Result<(), AmaError> {
         for component in path.components() {
             check.push(component);
             if check.exists() {
-                let meta = check.symlink_metadata().map_err(|e| AmaError::ServiceUnavailable {
-                    message: format!("lstat failed on {}: {}", check.display(), e),
-                })?;
+                let meta = check
+                    .symlink_metadata()
+                    .map_err(|e| AmaError::ServiceUnavailable {
+                        message: format!("lstat failed on {}: {}", check.display(), e),
+                    })?;
                 if meta.file_type().is_symlink() {
                     return Err(AmaError::Validation {
                         error_class: "invalid_target".into(),
@@ -185,7 +190,10 @@ pub fn cleanup_orphan_temps(workspace_root: &Path) -> usize {
     if let Ok(entries) = walkdir(workspace_root) {
         for path in entries {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.contains(".ama.") && name.ends_with(".tmp") && fs::remove_file(&path).is_ok() {
+                if name.contains(".ama.")
+                    && name.ends_with(".tmp")
+                    && fs::remove_file(&path).is_ok()
+                {
                     cleaned += 1;
                 }
             }

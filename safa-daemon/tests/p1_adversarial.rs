@@ -1,12 +1,11 @@
+use axum::http::StatusCode;
 /// P1 Section 9 — Cross-Cutting Adversarial Tests
 ///
 /// These tests validate that SAFA's hardened subsystems interact correctly
 /// under combined stress. Each test exercises multiple workstreams simultaneously.
 ///
 /// Reference: docs/SAFA_P1_TASKLIST.md (Section 9)
-
 use safa_daemon::server::{test_server, test_server_with_capacity};
-use axum::http::StatusCode;
 use uuid::Uuid;
 
 // ─────────────────────────────────────────────
@@ -99,7 +98,10 @@ async fn test_duplicate_key_under_queue_pressure() {
     resp2.assert_status_ok();
     let body2 = resp2.text();
 
-    assert_eq!(body1, body2, "replay under queue pressure must return identical result");
+    assert_eq!(
+        body1, body2,
+        "replay under queue pressure must return identical result"
+    );
 }
 
 // ─────────────────────────────────────────────
@@ -289,10 +291,7 @@ async fn test_capacity_exhaustion_plus_replay() {
         replay.status_code()
     );
     let replay_body = replay.text();
-    assert_eq!(
-        saved_body, replay_body,
-        "replay body must match original"
-    );
+    assert_eq!(saved_body, replay_body, "replay body must match original");
 }
 
 // ─────────────────────────────────────────────

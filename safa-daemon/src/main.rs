@@ -1,6 +1,6 @@
-use safa_core::config::AmaConfig;
 use safa_core::actuator::file::cleanup_orphan_temps;
-use safa_daemon::server::{AppState, build_router, shutdown_signal};
+use safa_core::config::AmaConfig;
+use safa_daemon::server::{build_router, shutdown_signal, AppState};
 use std::path::Path;
 
 #[tokio::main]
@@ -17,7 +17,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cleaned = cleanup_orphan_temps(&config.workspace_root);
     if cleaned > 0 {
-        tracing::warn!(count = cleaned, "Cleaned up orphan temp files from previous session");
+        tracing::warn!(
+            count = cleaned,
+            "Cleaned up orphan temp files from previous session"
+        );
     }
 
     let bind_addr = format!("{}:{}", config.bind_host, config.bind_port);

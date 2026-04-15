@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 /// P1 WS5 — Execution Timeouts and Bounded Completion Tests
 ///
 /// These tests validate:
@@ -7,9 +8,7 @@
 ///
 /// Reference: docs/SAFA_IDEMPOTENCY_STATE_MACHINE.md (sections 9-10)
 /// Reference: docs/SAFA_P1_TASKLIST.md (WS5)
-
 use safa_daemon::server::{test_server, test_server_with_capacity};
-use axum::http::StatusCode;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -32,7 +31,8 @@ async fn post_action(
         body["payload"] = serde_json::Value::String(p.to_string());
     }
 
-    server.post("/ama/action")
+    server
+        .post("/ama/action")
         .add_header(
             axum::http::header::HeaderName::from_static("idempotency-key"),
             axum::http::header::HeaderValue::from_str(key).unwrap(),
@@ -65,7 +65,12 @@ async fn test_error_commits_to_done_not_remove() {
     let status1 = resp1.status_code();
 
     // Should be FORBIDDEN (Impossible) since capacity is exhausted
-    assert_eq!(status1, StatusCode::FORBIDDEN, "expected capacity denial, got {}", status1);
+    assert_eq!(
+        status1,
+        StatusCode::FORBIDDEN,
+        "expected capacity denial, got {}",
+        status1
+    );
 
     // NOW THE KEY TEST: retry with same key2
     // Model A says: error was terminal, must replay the same error
@@ -103,7 +108,8 @@ async fn test_bad_json_commits_to_done_not_remove() {
     let key = Uuid::new_v4().to_string();
 
     // Send malformed JSON with valid idempotency key
-    let resp1 = server.post("/ama/action")
+    let resp1 = server
+        .post("/ama/action")
         .add_header(
             axum::http::header::HeaderName::from_static("idempotency-key"),
             axum::http::header::HeaderValue::from_str(&key).unwrap(),
@@ -113,10 +119,15 @@ async fn test_bad_json_commits_to_done_not_remove() {
         .await;
 
     let status1 = resp1.status_code();
-    assert_eq!(status1, StatusCode::BAD_REQUEST, "first request should fail with bad JSON");
+    assert_eq!(
+        status1,
+        StatusCode::BAD_REQUEST,
+        "first request should fail with bad JSON"
+    );
 
     // Retry with same key — Model A says replay the error
-    let resp2 = server.post("/ama/action")
+    let resp2 = server
+        .post("/ama/action")
         .add_header(
             axum::http::header::HeaderName::from_static("idempotency-key"),
             axum::http::header::HeaderValue::from_str(&key).unwrap(),
@@ -129,7 +140,8 @@ async fn test_bad_json_commits_to_done_not_remove() {
 
     // Under Model A: must replay (200 with cached error), not re-parse
     assert_eq!(
-        status2, StatusCode::OK,
+        status2,
+        StatusCode::OK,
         "Model A violation: retry after bad JSON should replay cached error (200), got {}. \
          This means remove() was called instead of complete().",
         status2
@@ -146,16 +158,35 @@ async fn test_success_replay_returns_identical_result() {
     let key = Uuid::new_v4().to_string();
 
     // First request: succeeds
-    let resp1 = post_action(&server, &key, "file_write", "replay_test.txt", 1, Some("hello")).await;
+    let resp1 = post_action(
+        &server,
+        &key,
+        "file_write",
+        "replay_test.txt",
+        1,
+        Some("hello"),
+    )
+    .await;
     resp1.assert_status_ok();
     let body1 = resp1.text();
 
     // Replay with same key
-    let resp2 = post_action(&server, &key, "file_write", "replay_test.txt", 1, Some("hello")).await;
+    let resp2 = post_action(
+        &server,
+        &key,
+        "file_write",
+        "replay_test.txt",
+        1,
+        Some("hello"),
+    )
+    .await;
     resp2.assert_status_ok();
     let body2 = resp2.text();
 
-    assert_eq!(body1, body2, "replayed response must be identical to original");
+    assert_eq!(
+        body1, body2,
+        "replayed response must be identical to original"
+    );
 }
 
 /// Test 4 — InFlight response returns 409 Conflict (Policy A)

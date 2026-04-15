@@ -5,14 +5,14 @@
 ///
 /// Reference: docs/SAFA_P1_TASKLIST.md (WS4)
 /// Reference: docs/KNOWN_ISSUES_P1.md (C3)
-
 use safa_daemon::server::{test_server, test_server_with_capacity};
 use uuid::Uuid;
 
 /// Helper: POST a valid action
 async fn post_valid_action(server: &axum_test::TestServer) -> axum_test::TestResponse {
     let key = Uuid::new_v4().to_string();
-    server.post("/ama/action")
+    server
+        .post("/ama/action")
         .add_header(
             axum::http::header::HeaderName::from_static("idempotency-key"),
             axum::http::header::HeaderValue::from_str(&key).unwrap(),
@@ -37,9 +37,11 @@ async fn test_rate_limit_sequential_within_limit() {
     for i in 0..10 {
         let resp = post_valid_action(&server).await;
         assert!(
-            resp.status_code().is_success() || resp.status_code() == axum::http::StatusCode::FORBIDDEN,
+            resp.status_code().is_success()
+                || resp.status_code() == axum::http::StatusCode::FORBIDDEN,
             "request {} should not be rate-limited, got {}",
-            i, resp.status_code()
+            i,
+            resp.status_code()
         );
     }
 }
