@@ -136,14 +136,22 @@ fn canonicalize(request: &ActionRequest, config: &AmaConfig, agent_id: Option<&s
         "http_request" => {
             let method_str = request.method.as_deref().unwrap_or("");
             let method = HttpMethod::parse(method_str)?;
-            let url = AllowlistedUrl::new(&request.target, &config.allowlist)?;
+            let url = AllowlistedUrl::new(&request.target, method, &config.allowlist)?;
             let body = match &request.payload {
                 Some(data) => {
-                    let max = config.domain_mappings
+                    // Effective body cap = min(global domain cap, allowlist entry cap).
+                    // This enforces the per-entry `max_body_bytes` declared in
+                    // allowlist.toml in addition to the global domain cap from
+                    // domains.toml. Previously only the global cap was applied.
+                    let domain_max = config.domain_mappings
                         .get("http_request")
                         .and_then(|m| m.max_payload_bytes)
                         .unwrap_or(262_144);
-                    Some(BoundedBytes::new(data.clone(), max)?)
+                    let effective_max = match url.matched_max_body_bytes() {
+                        Some(entry_max) => domain_max.min(entry_max),
+                        None => domain_max,
+                    };
+                    Some(BoundedBytes::new(data.clone(), effective_max)?)
                 }
                 None => None,
             };

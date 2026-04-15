@@ -56,7 +56,7 @@ fn intent_id_rejects_traversal() {
 
 #[test]
 fn allowlisted_url_rejects_http() {
-    assert!(AllowlistedUrl::new("http://example.com", &[]).is_err());
+    assert!(AllowlistedUrl::new("http://example.com", HttpMethod::Get, &[]).is_err());
 }
 
 #[test]
@@ -66,5 +66,33 @@ fn allowlisted_url_rejects_not_in_list() {
         methods: vec!["GET".to_string()],
         max_body_bytes: None,
     }];
-    assert!(AllowlistedUrl::new("https://evil.com/steal", &patterns).is_err());
+    assert!(AllowlistedUrl::new("https://evil.com/steal", HttpMethod::Get, &patterns).is_err());
+}
+
+#[test]
+fn allowlisted_url_rejects_disallowed_method() {
+    // Regression test for allowlist method enforcement (was parsed but ignored).
+    let patterns = vec![AllowlistEntry {
+        pattern: "https://api.github.com/*".to_string(),
+        methods: vec!["GET".to_string()],
+        max_body_bytes: None,
+    }];
+    // GET is permitted.
+    assert!(AllowlistedUrl::new("https://api.github.com/foo", HttpMethod::Get, &patterns).is_ok());
+    // POST is NOT in the methods list — must be rejected.
+    assert!(AllowlistedUrl::new("https://api.github.com/foo", HttpMethod::Post, &patterns).is_err());
+}
+
+#[test]
+fn allowlisted_url_exposes_entry_max_body_bytes() {
+    // Regression test: the entry's max_body_bytes must propagate to callers
+    // so the pipeline can tighten the global domain cap.
+    let patterns = vec![AllowlistEntry {
+        pattern: "https://api.github.com/*".to_string(),
+        methods: vec!["POST".to_string()],
+        max_body_bytes: Some(1024),
+    }];
+    let url = AllowlistedUrl::new("https://api.github.com/foo", HttpMethod::Post, &patterns)
+        .expect("should match");
+    assert_eq!(url.matched_max_body_bytes(), Some(1024));
 }

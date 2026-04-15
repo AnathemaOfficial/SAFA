@@ -200,13 +200,33 @@ pub struct AllowlistEntry {
 }
 
 /// A URL guaranteed to be HTTPS and matched against the allowlist.
+///
+/// Construction (`new`) also enforces the allowlist entry's `methods` list
+/// and caches the entry's `max_body_bytes` cap (if any) so the HTTP pipeline
+/// can enforce a per-entry body size limit — tighter than the global domain
+/// payload cap when the allowlist declares one.
 #[derive(Debug, Clone)]
 pub struct AllowlistedUrl {
     url: String,
+    /// `max_body_bytes` from the matched allowlist entry. When `Some`, the
+    /// request body MUST NOT exceed this value (enforced in the HTTP actuator).
+    /// When `None`, the caller falls back to the global domain cap.
+    matched_max_body_bytes: Option<usize>,
 }
 
 impl AllowlistedUrl {
-    pub fn new(url: &str, allowlist: &[AllowlistEntry]) -> Result<Self, AmaError> {
+    /// Validate a URL against the allowlist for the given HTTP method.
+    ///
+    /// Rejects if:
+    /// - URL is not HTTPS
+    /// - URL contains userinfo or fragments
+    /// - URL does not match any allowlist pattern
+    /// - The matched entry does not permit the requested method
+    pub fn new(
+        url: &str,
+        method: HttpMethod,
+        allowlist: &[AllowlistEntry],
+    ) -> Result<Self, AmaError> {
         if !url.starts_with("https://") {
             return Err(AmaError::Validation {
                 error_class: "invalid_target".into(),
@@ -227,19 +247,44 @@ impl AllowlistedUrl {
                 message: "fragments in URL forbidden".into(),
             });
         }
-        let matched = allowlist.iter().any(|entry| {
-            glob_match(&entry.pattern, url)
-        });
-        if !matched {
-            return Err(AmaError::Validation {
+        let matched_entry = allowlist
+            .iter()
+            .find(|entry| glob_match(&entry.pattern, url))
+            .ok_or_else(|| AmaError::Validation {
                 error_class: "invalid_target".into(),
                 message: "URL not in allowlist".into(),
+            })?;
+
+        // Enforce per-entry method allowlist (fail-closed if `methods` is empty).
+        let method_str = method.as_str();
+        let method_allowed = matched_entry
+            .methods
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(method_str));
+        if !method_allowed {
+            return Err(AmaError::Validation {
+                error_class: "invalid_target".into(),
+                message: format!(
+                    "method {} not permitted for allowlist pattern '{}'",
+                    method_str, matched_entry.pattern
+                ),
             });
         }
-        Ok(Self { url: url.to_string() })
+
+        Ok(Self {
+            url: url.to_string(),
+            matched_max_body_bytes: matched_entry.max_body_bytes,
+        })
     }
 
     pub fn as_str(&self) -> &str { &self.url }
+
+    /// Returns the per-entry `max_body_bytes` cap from the matched allowlist
+    /// entry, or `None` if the entry did not declare one (in which case the
+    /// caller should fall back to the global domain cap).
+    pub fn matched_max_body_bytes(&self) -> Option<usize> {
+        self.matched_max_body_bytes
+    }
 }
 
 /// Simple glob matching: `*` matches any suffix.
@@ -267,6 +312,14 @@ impl HttpMethod {
                 error_class: "invalid_method".into(),
                 message: format!("unsupported method: {}", s),
             }),
+        }
+    }
+
+    /// Canonical uppercase representation, used for allowlist method matching.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
         }
     }
 }

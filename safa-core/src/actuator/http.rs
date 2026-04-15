@@ -147,11 +147,15 @@ pub async fn http_request(
         }
     }
 
-    // Validate final URL against allowlist (after redirects)
+    // Validate final URL against allowlist (after redirects).
+    // We revalidate with the ORIGINAL method — this is conservative: if a
+    // redirect leads to a URL where only a different method is allowed,
+    // the request is rejected (fail-closed). For reqwest's default redirect
+    // policy this matches real behavior for 307/308 (method preserved) and is
+    // slightly tighter than needed for 301/302/303 (POST -> GET conversion).
     let final_url = response.url().as_str();
     if final_url != url_str {
-        // Re-check allowlist for redirect target
-        let _ = AllowlistedUrl::new(final_url, allowlist).map_err(|_| AmaError::Validation {
+        let _ = AllowlistedUrl::new(final_url, method, allowlist).map_err(|_| AmaError::Validation {
             error_class: "redirect_error".into(),
             message: "redirect target not in allowlist".into(),
         })?;
