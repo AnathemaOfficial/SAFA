@@ -242,6 +242,69 @@ mod tests {
         assert_eq!(m1.manifest_hash, m2.manifest_hash);
     }
 
+    /// Copilot audit finding M-02: `serde_json` serializes struct fields in
+    /// declaration order. If a future maintainer reorders fields in
+    /// `ManifestForHashing`, every downstream verifier's manifest_hash
+    /// breaks silently. This test pins the exact byte layout of the
+    /// canonical JSON for a known fixture so any reorder shows up as a
+    /// hard CI failure with a clear diff rather than silent attestation
+    /// drift across languages.
+    #[test]
+    fn test_manifest_canonical_json_is_field_order_stable() {
+        use crate::config::{AgentConfig, DomainPolicy};
+        use std::collections::HashMap;
+
+        let mut domain_policies = HashMap::new();
+        domain_policies.insert(
+            "fs.write.workspace".into(),
+            DomainPolicy {
+                enabled: true,
+                max_magnitude_per_action: 100,
+            },
+        );
+
+        let config = AgentConfig {
+            agent_id: "pin-test".into(),
+            max_capacity: 10_000,
+            rate_limit_per_window: 60,
+            rate_limit_window_secs: 60,
+            domain_policies,
+            secret: None,
+        };
+
+        let manifest = PublicManifest::from_agent_config(&config, "bundle-pin");
+
+        // Rebuild the exact hashable payload and compare byte-for-byte.
+        let expected_json = concat!(
+            "{",
+            "\"schema_version\":\"safa-manifest-v2\",",
+            "\"agent_id\":\"pin-test\",",
+            "\"identity_bound\":false,",
+            "\"max_capacity\":10000,",
+            "\"rate_limit_per_window\":60,",
+            "\"rate_limit_window_secs\":60,",
+            "\"domains\":{",
+            "\"fs.write.workspace\":{",
+            "\"enabled\":true,",
+            "\"max_magnitude_per_action\":100",
+            "}",
+            "},",
+            "\"policy_bundle_hash\":\"bundle-pin\"",
+            "}"
+        );
+
+        let mut expected_hasher = Sha256::new();
+        expected_hasher.update(expected_json.as_bytes());
+        let expected_hash = format!("{:x}", expected_hasher.finalize());
+
+        assert_eq!(
+            manifest.manifest_hash, expected_hash,
+            "canonical JSON field order has drifted — ManifestForHashing \
+             fields must remain in the exact declaration order covered by \
+             this fixture, otherwise every downstream verifier breaks"
+        );
+    }
+
     #[test]
     fn test_manifest_hash_changes_with_config() {
         let config_a = test_agent(true);

@@ -104,12 +104,25 @@ impl ProofStore {
 
 /// Compute SHA-256 hash of the canonical action representation.
 /// Hashes over (action, target, magnitude) — NOT raw JSON.
+///
+/// Copilot audit finding M-04: the earlier form concatenated
+/// `action | "|" | target | "|" | magnitude_le`. If either `action` or
+/// `target` contained the literal `|` character, `("a|b", "c")` and
+/// `("a", "b|c")` collapsed to the same hash — an audit-log collision.
+/// The encoding is now injective over the triple: each variable-length
+/// field is prefixed with its u32 big-endian byte length, and a stable
+/// schema tag (`safa-audit-v2`) separates this domain from v1.
 pub fn compute_request_hash(action: &str, target: &str, magnitude: u64) -> String {
+    fn write_len_prefixed(hasher: &mut Sha256, bytes: &[u8]) {
+        let len = bytes.len() as u32;
+        hasher.update(len.to_be_bytes());
+        hasher.update(bytes);
+    }
+
     let mut hasher = Sha256::new();
-    hasher.update(action.as_bytes());
-    hasher.update(b"|");
-    hasher.update(target.as_bytes());
-    hasher.update(b"|");
+    hasher.update(b"safa-audit-v2");
+    write_len_prefixed(&mut hasher, action.as_bytes());
+    write_len_prefixed(&mut hasher, target.as_bytes());
     hasher.update(magnitude.to_le_bytes());
     format!("{:x}", hasher.finalize())
 }

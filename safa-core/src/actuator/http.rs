@@ -137,14 +137,29 @@ pub async fn http_request(
     })?;
 
     // Re-validate the actual remote IP after connection (DNS rebinding protection)
-    if let Some(remote_addr) = response.remote_addr() {
-        let ip = remote_addr.ip();
-        if is_private_ip(ip) {
-            return Err(AmaError::Validation {
-                error_class: "invalid_target".into(),
-                message: format!("response came from private IP: {}", ip),
-            });
-        }
+    // Post-connect IP revalidation (DNS rebinding guard).
+    //
+    // Claude audit finding H2 / Copilot audit finding H-01: previously
+    // `if let Some(remote_addr) = response.remote_addr()` silently skipped
+    // the private-IP check when reqwest could not report the remote
+    // address (proxy paths, some TLS configurations, certain redirect
+    // chains). An attacker able to force that condition bypassed the
+    // DNS-rebinding defence entirely. We now fail-closed when the remote
+    // address is unknown — the post-connect check is the only layer that
+    // catches a DNS record that rebound between `validate_dns` and the
+    // reqwest connect.
+    let remote_addr = response
+        .remote_addr()
+        .ok_or_else(|| AmaError::Validation {
+            error_class: "invalid_target".into(),
+            message: "could not determine remote IP for post-connect validation".into(),
+        })?;
+    let ip = remote_addr.ip();
+    if is_private_ip(ip) {
+        return Err(AmaError::Validation {
+            error_class: "invalid_target".into(),
+            message: format!("response came from private IP: {}", ip),
+        });
     }
 
     // Validate final URL against allowlist (after redirects).

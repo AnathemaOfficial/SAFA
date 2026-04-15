@@ -66,7 +66,24 @@ pub async fn shell_exec(
         message: format!("failed to spawn process: {}", e),
     })?;
 
-    let pid = child.id().unwrap_or(0) as i32;
+    // Copilot audit finding H-03: treat a missing child PID as fatal.
+    // Previously `child.id().unwrap_or(0) as i32` meant that if the OS ever
+    // failed to report a PID (post-wait on some platforms, transient error),
+    // the subsequent timeout `kill(-pid, SIG...)` became `kill(-0, ...)`
+    // which signals the ENTIRE process group of the caller — i.e. the
+    // SAFA daemon itself and any co-grouped ancestors. We now fail the
+    // action cleanly rather than self-kill.
+    let pid: i32 = match child.id() {
+        Some(raw) => raw as i32,
+        None => {
+            // Best-effort cleanup: try to kill the child by handle
+            // (non-group) so it doesn't dangle.
+            let _ = child.kill().await;
+            return Err(AmaError::ServiceUnavailable {
+                message: "could not obtain child PID; aborting action to preserve daemon".into(),
+            });
+        }
+    };
 
     // Take ownership of stdout/stderr handles
     let mut stdout_handle = child.stdout.take().unwrap();
