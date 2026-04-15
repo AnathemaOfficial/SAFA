@@ -252,7 +252,13 @@ fn check_rate_limit(state: &AppState, agent_id: &str) -> bool {
         Some(l) => l,
         None => return false,
     };
-    let mut rl = limiter.lock().unwrap();
+    // Recover from poisoned mutex instead of panicking: if a prior task
+    // panicked while holding this lock, the data is still readable/writable,
+    // and taking the daemon down with it would turn a localized bug into a
+    // full DoS. The rate-limiter state is advisory per-window, not a security
+    // boundary — accepting a potentially-inconsistent window start is strictly
+    // safer than panicking.
+    let mut rl = limiter.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = Instant::now();
     let elapsed = now.duration_since(rl.window_start);
 
@@ -280,7 +286,16 @@ fn check_signed_replay(
     signature_hex: &str,
     idempotency_key: Uuid,
 ) -> Result<(), Response> {
-    let mut replay_cache = state.replay_cache.lock().unwrap();
+    // Recover from poisoned mutex instead of panicking: losing a single
+    // rate-limit or replay-cache update to a poisoned lock is strictly safer
+    // than bringing the entire daemon down, which would turn any panic in a
+    // mutex-guarded section into a full DoS. The replay cache is a bounded
+    // in-memory structure with its own consistency checks, so reading a
+    // partially-inconsistent state from a recovered poison is acceptable.
+    let mut replay_cache = state
+        .replay_cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     match replay_cache.check_or_insert(agent_id, timestamp, signature_hex, idempotency_key) {
         ReplayCheck::New | ReplayCheck::SameIdempotencyKey => Ok(()),
         ReplayCheck::DifferentIdempotencyKey => Err((
@@ -357,7 +372,8 @@ async fn handle_manifest(
 ) -> Response {
     match state.config.agents.get(&agent_id) {
         Some(agent_config) => {
-            let manifest = PublicManifest::from_agent_config(agent_config);
+            let bundle_hash = state.config.boot_hashes.policy_bundle_hash();
+            let manifest = PublicManifest::from_agent_config(agent_config, &bundle_hash);
             let hash = manifest.hash().to_string();
             (
                 StatusCode::OK,
@@ -574,8 +590,14 @@ async fn handle_action(
 
     // 7. Build response and cache
     //    P3: Include X-Safa-Policy-Hash header for Proof-of-Constraint
+    //    The manifest hash embeds the full policy bundle (domains + intents +
+    //    allowlist) so external verifiers see a different hash whenever the
+    //    effective policy surface changes — not just per-agent caps.
     let policy_hash = state.config.agents.get(&agent_id)
-        .map(|ac| PublicManifest::from_agent_config(ac).hash().to_string())
+        .map(|ac| {
+            let bundle_hash = state.config.boot_hashes.policy_bundle_hash();
+            PublicManifest::from_agent_config(ac, &bundle_hash).hash().to_string()
+        })
         .unwrap_or_default();
 
     // P3: Store proof record for Proof-of-Constraint endpoint

@@ -17,6 +17,29 @@ pub struct BootHashes {
     pub agents_hash: String,
 }
 
+impl BootHashes {
+    /// Deterministic hash covering the full *effective policy* — the actual
+    /// rules that govern whether an action is permitted.
+    ///
+    /// Covers: domain→action mappings (`domains.toml`), intent templates
+    /// (`intents.toml`), and the URL allowlist (`allowlist.toml`). Does NOT
+    /// include `config.toml` (deployment-specific: workspace path, bind host)
+    /// nor the per-agent HMAC secrets.
+    ///
+    /// This value is embedded in every `PublicManifest` so that any change
+    /// to the effective policy surface — even one that leaves an agent's
+    /// own caps untouched — produces a visibly different proof hash.
+    pub fn policy_bundle_hash(&self) -> String {
+        // Canonical concatenation with explicit field labels: any reordering,
+        // renaming, or addition of fields produces a different hash.
+        let combined = format!(
+            "safa-policy-bundle-v1|domains={}|intents={}|allowlist={}",
+            self.domains_hash, self.intents_hash, self.allowlist_hash
+        );
+        sha256_hex(combined.as_bytes())
+    }
+}
+
 fn sha256_hex(data: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(data);

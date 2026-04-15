@@ -96,3 +96,30 @@ fn allowlisted_url_exposes_entry_max_body_bytes() {
         .expect("should match");
     assert_eq!(url.matched_max_body_bytes(), Some(1024));
 }
+
+#[test]
+fn allowlisted_url_rejects_subdomain_confusion() {
+    // Regression test for subdomain-confusion attack in the glob matcher.
+    // Even if a pattern is written WITHOUT a trailing '/' before the '*'
+    // (so the wildcard technically could extend the hostname), the matcher
+    // must refuse URLs whose authority doesn't end at a structural boundary.
+    let patterns = vec![AllowlistEntry {
+        pattern: "https://api.github.com*".to_string(),   // no '/' before '*'
+        methods: vec!["GET".to_string()],
+        max_body_bytes: None,
+    }];
+    // Legitimate URL under the host → allowed (next char after prefix is '/')
+    assert!(AllowlistedUrl::new("https://api.github.com/foo", HttpMethod::Get, &patterns).is_ok());
+    // Attacker-controlled subdomain extension → MUST be rejected
+    assert!(AllowlistedUrl::new(
+        "https://api.github.com.evil.com/steal",
+        HttpMethod::Get,
+        &patterns
+    ).is_err());
+    // Port variant → also must be rejected if it extends the hostname
+    assert!(AllowlistedUrl::new(
+        "https://api.github.com-evil.com/x",
+        HttpMethod::Get,
+        &patterns
+    ).is_err());
+}

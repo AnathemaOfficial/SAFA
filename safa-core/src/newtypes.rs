@@ -287,10 +287,49 @@ impl AllowlistedUrl {
     }
 }
 
-/// Simple glob matching: `*` matches any suffix.
+/// Prefix glob matching with subdomain-confusion guard.
+///
+/// `pattern` may end with `*` to allow any suffix. The trailing `*` is
+/// stripped and the URL must start with the remaining prefix. To prevent
+/// subdomain confusion attacks (e.g. pattern `https://api.github.com*`
+/// matching the attacker-controlled URL `https://api.github.com.evil.com/x`),
+/// an additional boundary check is applied: if the stripped prefix ends
+/// INSIDE a hostname (its last character is alphanumeric, `.`, or `-`),
+/// the next character in the URL MUST be a URL structural boundary
+/// (`/`, `?`, `#`, or `:`). Otherwise the wildcard would span more of the
+/// authority than the operator intended.
+///
+/// Examples:
+/// - pattern `https://api.github.com/*` (ends with `/`, a boundary)
+///   → matches `https://api.github.com/foo` ✓
+///   → does NOT match `https://api.github.com.evil.com/x` (starts_with fails)
+/// - pattern `https://api.github.com*` (ends INSIDE hostname)
+///   → matches `https://api.github.com/foo` ✓ (next char `/` is a boundary)
+///   → does NOT match `https://api.github.com.evil.com/x` ✓ (next char `.` extends host)
 fn glob_match(pattern: &str, url: &str) -> bool {
     if let Some(prefix) = pattern.strip_suffix('*') {
-        url.starts_with(prefix)
+        if !url.starts_with(prefix) {
+            return false;
+        }
+        let remainder = &url[prefix.len()..];
+        if remainder.is_empty() {
+            return true;
+        }
+        let prefix_ends_inside_hostname = prefix
+            .chars()
+            .last()
+            .map(|c| c.is_alphanumeric() || c == '.' || c == '-')
+            .unwrap_or(false);
+        if !prefix_ends_inside_hostname {
+            // Prefix ends at a URL-structural character — wildcard can freely
+            // match anything beyond this point.
+            return true;
+        }
+        // Prefix ends inside a hostname: the next char must be a boundary
+        // that escapes the authority zone, otherwise we'd be letting `*`
+        // extend the hostname itself.
+        let next = remainder.chars().next().unwrap();
+        matches!(next, '/' | '?' | '#' | ':')
     } else {
         url == pattern
     }

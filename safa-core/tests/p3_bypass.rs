@@ -155,7 +155,7 @@ fn bypass_manifest_secret_not_leaked() {
         secret: Some("super-secret-key-that-must-never-leak!!".into()),
     };
 
-    let manifest = PublicManifest::from_agent_config(&config);
+    let manifest = PublicManifest::from_agent_config(&config, "test-bundle");
     let json = serde_json::to_string(&manifest).unwrap();
 
     assert!(!json.contains("super-secret"), "secret must never appear in manifest JSON");
@@ -193,8 +193,35 @@ fn bypass_manifest_hash_tamper_detection() {
         secret: None,
     };
 
-    let hash_original = PublicManifest::from_agent_config(&config_original).manifest_hash;
-    let hash_tampered = PublicManifest::from_agent_config(&config_tampered).manifest_hash;
+    let hash_original = PublicManifest::from_agent_config(&config_original, "test-bundle").manifest_hash;
+    let hash_tampered = PublicManifest::from_agent_config(&config_tampered, "test-bundle").manifest_hash;
 
     assert_ne!(hash_original, hash_tampered, "tampered config must produce different hash");
+}
+
+#[test]
+fn bypass_manifest_hash_tamper_detection_policy_bundle() {
+    // Regression test for GPT audit finding #2: manifest_hash must change
+    // when the policy bundle (domains/intents/allowlist) changes, even if
+    // the per-agent config stays identical. Without this, silent policy
+    // drift would leave all manifests reporting the same hash.
+    let mut policies = HashMap::new();
+    policies.insert("fs.write.workspace".into(), DomainPolicy {
+        enabled: true,
+        max_magnitude_per_action: 1000,
+    });
+
+    let config = AgentConfig {
+        agent_id: "agent".into(),
+        max_capacity: 100_000,
+        rate_limit_per_window: 60,
+        rate_limit_window_secs: 60,
+        domain_policies: policies,
+        secret: None,
+    };
+
+    let hash_bundle_a = PublicManifest::from_agent_config(&config, "bundle-hash-A").manifest_hash;
+    let hash_bundle_b = PublicManifest::from_agent_config(&config, "bundle-hash-B").manifest_hash;
+
+    assert_ne!(hash_bundle_a, hash_bundle_b, "different bundle hash must produce different manifest hash");
 }
