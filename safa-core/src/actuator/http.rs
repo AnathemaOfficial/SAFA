@@ -1,6 +1,5 @@
 use crate::errors::AmaError;
-use crate::newtypes::{AllowlistedUrl, AllowlistEntry, BoundedBytes, HttpMethod};
-use bytes::Bytes;
+use crate::newtypes::{AllowlistEntry, AllowlistedUrl, BoundedBytes, HttpMethod};
 use reqwest::redirect::Policy;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -28,7 +27,7 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
             || v4.is_link_local()      // 169.254.0.0/16 (includes metadata 169.254.169.254)
             || v4.is_broadcast()
             || v4.is_unspecified()
-            || v4.octets()[0] == 0     // 0.0.0.0/8
+            || v4.octets()[0] == 0 // 0.0.0.0/8
         }
         IpAddr::V6(v6) => {
             v6.is_loopback()           // ::1
@@ -98,7 +97,7 @@ pub async fn http_request(
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(TOTAL_TIMEOUT)
         .redirect(Policy::limited(MAX_REDIRECTS))
-        .https_only(true)              // HTTPS only
+        .https_only(true) // HTTPS only
         .danger_accept_invalid_certs(false) // TLS validation ON
         .build()
         .map_err(|e| AmaError::ServiceUnavailable {
@@ -111,7 +110,8 @@ pub async fn http_request(
         HttpMethod::Post => {
             let mut req = client.post(url_str);
             if let Some(body_data) = body {
-                req = req.body(body_data.as_str().to_string())
+                req = req
+                    .body(body_data.as_str().to_string())
                     .header("Content-Type", "application/json");
             }
             req
@@ -119,7 +119,7 @@ pub async fn http_request(
     };
 
     // Execute
-    let response: reqwest::Response = request.send().await.map_err(|e| {
+    let mut response: reqwest::Response = request.send().await.map_err(|e| {
         if e.is_redirect() {
             AmaError::Validation {
                 error_class: "redirect_error".into(),
@@ -155,28 +155,34 @@ pub async fn http_request(
     // slightly tighter than needed for 301/302/303 (POST -> GET conversion).
     let final_url = response.url().as_str();
     if final_url != url_str {
-        let _ = AllowlistedUrl::new(final_url, method, allowlist).map_err(|_| AmaError::Validation {
-            error_class: "redirect_error".into(),
-            message: "redirect target not in allowlist".into(),
+        let _ = AllowlistedUrl::new(final_url, method, allowlist).map_err(|_| {
+            AmaError::Validation {
+                error_class: "redirect_error".into(),
+                message: "redirect target not in allowlist".into(),
+            }
         })?;
     }
 
     let status_code = response.status().as_u16();
 
-    // Bounded body read (256 KiB max)
-    let body_bytes: Bytes = response.bytes().await.map_err(|e| AmaError::ServiceUnavailable {
-        message: format!("failed to read response body: {}", e),
-    })?;
-
-    let truncated = body_bytes.len() > MAX_RESPONSE_BYTES;
-    let read_bytes = if truncated {
-        &body_bytes[..MAX_RESPONSE_BYTES]
-    } else {
-        &body_bytes[..]
-    };
+    // Bounded body read (256 KiB max) while streaming chunks from reqwest.
+    let mut body_bytes = Vec::with_capacity(MAX_RESPONSE_BYTES.min(8192));
+    let mut truncated = false;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("failed to read response body: {}", e),
+        })?
+    {
+        if append_bounded_bytes(&mut body_bytes, &chunk, MAX_RESPONSE_BYTES) {
+            truncated = true;
+            break;
+        }
+    }
 
     // UTF-8 check (P0 text-only)
-    let body_text = String::from_utf8(read_bytes.to_vec()).map_err(|_| AmaError::ServiceUnavailable {
+    let body_text = String::from_utf8(body_bytes).map_err(|_| AmaError::ServiceUnavailable {
         message: "response body is not valid UTF-8 (P0 is text-only)".into(),
     })?;
 
@@ -185,4 +191,51 @@ pub async fn http_request(
         body: body_text,
         truncated,
     })
+}
+
+fn append_bounded_bytes(buffer: &mut Vec<u8>, chunk: &[u8], max_bytes: usize) -> bool {
+    let remaining = max_bytes.saturating_sub(buffer.len());
+    if remaining == 0 {
+        return !chunk.is_empty();
+    }
+
+    let copy_len = remaining.min(chunk.len());
+    buffer.extend_from_slice(&chunk[..copy_len]);
+    copy_len < chunk.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_bounded_bytes;
+
+    #[test]
+    fn append_bounded_bytes_keeps_under_cap_payloads() {
+        let mut buffer = Vec::new();
+        let truncated = append_bounded_bytes(&mut buffer, b"hello", 16);
+        assert!(!truncated);
+        assert_eq!(buffer, b"hello");
+    }
+
+    #[test]
+    fn append_bounded_bytes_accepts_exact_cap_without_truncation() {
+        let mut buffer = Vec::new();
+        assert!(!append_bounded_bytes(&mut buffer, b"hello", 5));
+        assert_eq!(buffer, b"hello");
+    }
+
+    #[test]
+    fn append_bounded_bytes_truncates_when_chunk_overflows_cap() {
+        let mut buffer = Vec::new();
+        let truncated = append_bounded_bytes(&mut buffer, b"hello world", 5);
+        assert!(truncated);
+        assert_eq!(buffer, b"hello");
+    }
+
+    #[test]
+    fn append_bounded_bytes_truncates_when_more_data_arrives_after_full_buffer() {
+        let mut buffer = b"hello".to_vec();
+        let truncated = append_bounded_bytes(&mut buffer, b"!", 5);
+        assert!(truncated);
+        assert_eq!(buffer, b"hello");
+    }
 }

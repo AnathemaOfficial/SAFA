@@ -1,7 +1,7 @@
 use crate::errors::AmaError;
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
 /// Result of a shell exec operation.
@@ -11,6 +11,11 @@ pub struct ShellExecResult {
     pub stderr: String,
     pub exit_code: i32,
     pub truncated: bool,
+}
+
+struct CapturedOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
 }
 
 /// Execute a binary with arguments in a new process group.
@@ -63,60 +68,57 @@ pub async fn shell_exec(
 
     // Bounded output capture with timeout
     let result = tokio::time::timeout(timeout, async {
-        let mut stdout_buf = vec![0u8; max_output_bytes];
-        let mut stderr_buf = vec![0u8; max_output_bytes];
+        let (stdout_capture, stderr_capture, status) = tokio::join!(
+            drain_bounded_output(&mut stdout_handle, max_output_bytes),
+            drain_bounded_output(&mut stderr_handle, max_output_bytes),
+            child.wait(),
+        );
 
-        let stdout_read = stdout_handle.read(&mut stdout_buf);
-        let stderr_read = stderr_handle.read(&mut stderr_buf);
+        let stdout_capture = stdout_capture.map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("stdout read failed: {}", e),
+        })?;
+        let stderr_capture = stderr_capture.map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("stderr read failed: {}", e),
+        })?;
+        let status = status.map_err(|e| AmaError::ServiceUnavailable {
+            message: format!("wait failed: {}", e),
+        })?;
 
-        let (stdout_n, stderr_n) = tokio::join!(stdout_read, stderr_read);
-        let stdout_n = stdout_n.unwrap_or(0);
-        let stderr_n = stderr_n.unwrap_or(0);
+        // UTF-8 validation (P0 is text-only)
+        let stdout =
+            String::from_utf8(stdout_capture.bytes).map_err(|_| AmaError::ServiceUnavailable {
+                message: "stdout contains non-UTF-8 data".into(),
+            })?;
+        let stderr =
+            String::from_utf8(stderr_capture.bytes).map_err(|_| AmaError::ServiceUnavailable {
+                message: "stderr contains non-UTF-8 data".into(),
+            })?;
 
-        let status = child.wait().await;
-
-        (stdout_buf, stdout_n, stderr_buf, stderr_n, status)
-    }).await;
+        Ok(ShellExecResult {
+            stdout,
+            stderr,
+            exit_code: status.code().unwrap_or(-1),
+            truncated: stdout_capture.truncated || stderr_capture.truncated,
+        })
+    })
+    .await;
 
     match result {
-        Ok((stdout_buf, stdout_n, stderr_buf, stderr_n, status)) => {
-            let stdout_truncated = stdout_n >= max_output_bytes;
-            let stderr_truncated = stderr_n >= max_output_bytes;
-
-            // UTF-8 validation (P0 is text-only)
-            let stdout = String::from_utf8(stdout_buf[..stdout_n].to_vec())
-                .map_err(|_| AmaError::ServiceUnavailable {
-                    message: "stdout contains non-UTF-8 data".into(),
-                })?;
-            let stderr = String::from_utf8(stderr_buf[..stderr_n].to_vec())
-                .map_err(|_| AmaError::ServiceUnavailable {
-                    message: "stderr contains non-UTF-8 data".into(),
-                })?;
-
-            let exit_code = status
-                .map_err(|e| AmaError::ServiceUnavailable {
-                    message: format!("wait failed: {}", e),
-                })?
-                .code()
-                .unwrap_or(-1);
-
-            Ok(ShellExecResult {
-                stdout,
-                stderr,
-                exit_code,
-                truncated: stdout_truncated || stderr_truncated,
-            })
-        }
+        Ok(inner) => inner,
         Err(_) => {
             // Timeout — execute kill sequence
             // SIGTERM to entire process group
             if pid > 0 {
-                unsafe { libc::kill(-pid, libc::SIGTERM); }
+                unsafe {
+                    libc::kill(-pid, libc::SIGTERM);
+                }
             }
             // Wait 2 seconds then SIGKILL
             tokio::time::sleep(Duration::from_secs(2)).await;
             if pid > 0 {
-                unsafe { libc::kill(-pid, libc::SIGKILL); }
+                unsafe {
+                    libc::kill(-pid, libc::SIGKILL);
+                }
             }
             // Reap the child
             let _ = child.wait().await;
@@ -129,4 +131,34 @@ pub async fn shell_exec(
             })
         }
     }
+}
+
+async fn drain_bounded_output<R: AsyncRead + Unpin>(
+    reader: &mut R,
+    max_output_bytes: usize,
+) -> std::io::Result<CapturedOutput> {
+    let mut retained = Vec::with_capacity(max_output_bytes.min(8192));
+    let mut chunk = [0u8; 8192];
+    let mut truncated = false;
+
+    loop {
+        let n = reader.read(&mut chunk).await?;
+        if n == 0 {
+            break;
+        }
+
+        let remaining = max_output_bytes.saturating_sub(retained.len());
+        let copy_len = remaining.min(n);
+        if copy_len > 0 {
+            retained.extend_from_slice(&chunk[..copy_len]);
+        }
+        if copy_len < n {
+            truncated = true;
+        }
+    }
+
+    Ok(CapturedOutput {
+        bytes: retained,
+        truncated,
+    })
 }
