@@ -221,6 +221,20 @@ pub struct AllowlistEntry {
 /// and caches the entry's `max_body_bytes` cap (if any) so the HTTP pipeline
 /// can enforce a per-entry body size limit — tighter than the global domain
 /// payload cap when the allowlist declares one.
+///
+/// Query-string semantics (Kimi audit observation M-1):
+/// The glob patterns in `allowlist.toml` match against the URL as a whole
+/// — scheme + authority + path + query — but operators typically write
+/// patterns that end at the path (e.g. `https://api.github.com/*`), in
+/// which case ANY query string is accepted. SAFA does NOT strip or
+/// sanitize query parameters: the downstream API still receives the
+/// caller-provided query unchanged. If the endpoint treats query keys
+/// as capability selectors (e.g. `?admin=1`, `?action=delete_repo`),
+/// the allowlist provides no protection — operators must either declare
+/// query-explicit patterns (e.g. `https://api.github.com/repos/*?page=*`)
+/// or accept that query-level authorization is the responsibility of the
+/// upstream service. Fragments (`#...`) are rejected outright by the URL
+/// hygiene checks below, and userinfo (`user:pass@`) too.
 #[derive(Debug, Clone)]
 pub struct AllowlistedUrl {
     url: String,

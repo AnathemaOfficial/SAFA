@@ -82,7 +82,10 @@ impl ProofStore {
         let mut records = self
             .records
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!("proof store mutex recovered from poison on insert");
+                poisoned.into_inner()
+            });
         if records.len() >= self.max_entries {
             // Evict one arbitrary entry to stay bounded
             if let Some(key) = records.keys().next().cloned() {
@@ -96,7 +99,10 @@ impl ProofStore {
     pub fn get(&self, request_id: &str) -> Option<ProofRecord> {
         self.records
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|poisoned| {
+                tracing::warn!(request_id = request_id, "proof store mutex recovered from poison on get");
+                poisoned.into_inner()
+            })
             .get(request_id)
             .cloned()
     }

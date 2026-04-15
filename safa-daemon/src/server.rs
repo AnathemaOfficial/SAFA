@@ -259,7 +259,16 @@ fn check_rate_limit(state: &AppState, agent_id: &str) -> bool {
     // safer than panicking.
     let mut rl = limiter
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(|poisoned| {
+            // Kimi audit observation: surface poison recovery so operators
+            // can correlate this with the panic that caused it, rather than
+            // silently masking a bug-in-progress.
+            tracing::warn!(
+                agent_id = agent_id,
+                "rate limiter mutex recovered from poison"
+            );
+            poisoned.into_inner()
+        });
     let now = Instant::now();
     let elapsed = now.duration_since(rl.window_start);
 
@@ -296,7 +305,13 @@ fn check_signed_replay(
     let mut replay_cache = state
         .replay_cache
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(|poisoned| {
+            tracing::warn!(
+                agent_id = agent_id,
+                "replay cache mutex recovered from poison"
+            );
+            poisoned.into_inner()
+        });
     match replay_cache.check_or_insert(agent_id, timestamp, signature_hex, idempotency_key) {
         ReplayCheck::New | ReplayCheck::SameIdempotencyKey => Ok(()),
         ReplayCheck::DifferentIdempotencyKey => Err((

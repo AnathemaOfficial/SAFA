@@ -208,17 +208,33 @@ fn verify_no_symlinks(path: &Path) -> Result<(), AmaError> {
 }
 
 /// Clean up orphan .ama.*.tmp files in a directory (called at startup).
+///
+/// Kimi audit observation: `fs::remove_file` on Unix calls `unlink(2)`,
+/// which removes the symlink itself rather than following it, so a
+/// symlink swapped in between the walk and the delete cannot redirect
+/// the deletion outside the workspace. We still `symlink_metadata` +
+/// reject any entry that is not a regular file for defense-in-depth and
+/// to stay consistent with `verify_no_symlinks` in the actuation path —
+/// no correctness claim on Unix, just an earlier failure surface and
+/// a cheap way to protect future ports or the write-through case where
+/// an underlying crate swaps `unlink` for something more permissive.
 pub fn cleanup_orphan_temps(workspace_root: &Path) -> usize {
     let mut cleaned = 0;
     if let Ok(entries) = walkdir(workspace_root) {
         for path in entries {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.contains(".ama.")
-                    && name.ends_with(".tmp")
-                    && fs::remove_file(&path).is_ok()
-                {
-                    cleaned += 1;
-                }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !(name.contains(".ama.") && name.ends_with(".tmp")) {
+                continue;
+            }
+            // Reject symlinks + non-regular entries before calling unlink.
+            match fs::symlink_metadata(&path) {
+                Ok(meta) if meta.file_type().is_file() => {}
+                _ => continue,
+            }
+            if fs::remove_file(&path).is_ok() {
+                cleaned += 1;
             }
         }
     }
