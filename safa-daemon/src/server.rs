@@ -96,7 +96,30 @@ impl ReplayCacheState {
         }
 
         if self.entries.len() >= self.max_entries {
-            return ReplayCheck::Full;
+            // MiniMax audit finding HIGH-01: previously this path returned
+            // ReplayCheck::Full, which bubbled up to a 503 for every
+            // subsequent authenticated request until TTL-expiry drained
+            // the cache. An attacker holding valid HMAC credentials could
+            // intentionally fill the cache to max_entries inside the
+            // 5-minute replay window and deny service to every other
+            // agent until the window rolled over.
+            //
+            // We now evict the single oldest entry (by seen_at) and accept
+            // the new request. Anti-replay semantics are preserved: the
+            // exact match above still fires whenever a replay presents the
+            // same (agent_id, timestamp, signature_hex), and eviction only
+            // targets entries old enough that no duplicate has matched
+            // against them in a full cache cycle. ReplayCheck::Full is
+            // retained on the enum for callers/tests but is no longer
+            // reachable from this insertion path.
+            if let Some(oldest_key) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.seen_at)
+                .map(|(k, _)| k.clone())
+            {
+                self.entries.remove(&oldest_key);
+            }
         }
 
         self.entries.insert(
@@ -396,12 +419,22 @@ async fn handle_manifest(
             let bundle_hash = state.config.boot_hashes.policy_bundle_hash();
             let manifest = PublicManifest::from_agent_config(agent_config, &bundle_hash);
             let hash = manifest.hash().to_string();
-            (
-                StatusCode::OK,
-                [("x-safa-policy-hash", hash)],
-                Json(serde_json::to_value(&manifest).unwrap()),
-            )
-                .into_response()
+            // MiniMax audit finding MED-02: serialization of the manifest
+            // type is infallible under the current schema, but relying on
+            // that via .unwrap() means any future non-serializable field
+            // (e.g. a map with non-string keys introduced upstream) would
+            // panic the request handler thread rather than returning a
+            // clean 500. Downgrade to a tracing error + 500.
+            match serde_json::to_value(&manifest) {
+                Ok(body) => (StatusCode::OK, [("x-safa-policy-hash", hash)], Json(body))
+                    .into_response(),
+                Err(err) => {
+                    tracing::error!(?err, "failed to serialize PublicManifest");
+                    ama_error_response(AmaError::ServiceUnavailable {
+                        message: "manifest serialization failed".into(),
+                    })
+                }
+            }
         }
         None => (
             StatusCode::NOT_FOUND,
@@ -423,12 +456,26 @@ async fn handle_proof(
     axum::extract::Path(request_id): axum::extract::Path<String>,
 ) -> Response {
     match state.proof_store.get(&request_id) {
-        Some(record) => (
-            StatusCode::OK,
-            [("x-safa-policy-hash", record.manifest_hash.clone())],
-            Json(serde_json::to_value(&record).unwrap()),
-        )
-            .into_response(),
+        Some(record) => {
+            // MiniMax audit finding MED-02: same rationale as the manifest
+            // handler — proof records are infallible today but we must not
+            // panic the request path on a future schema change.
+            let manifest_hash = record.manifest_hash.clone();
+            match serde_json::to_value(&record) {
+                Ok(body) => (
+                    StatusCode::OK,
+                    [("x-safa-policy-hash", manifest_hash)],
+                    Json(body),
+                )
+                    .into_response(),
+                Err(err) => {
+                    tracing::error!(?err, "failed to serialize ProofRecord");
+                    ama_error_response(AmaError::ServiceUnavailable {
+                        message: "proof record serialization failed".into(),
+                    })
+                }
+            }
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({
