@@ -76,8 +76,8 @@ impl ProofStore {
         }
     }
 
-    /// Store a proof record. If at capacity, silently drops oldest
-    /// (HashMap doesn't preserve order, but bounded size prevents OOM).
+    /// Store a proof record. If at capacity, evicts the oldest entry by
+    /// timestamp (RFC 3339 UTC strings sort lexicographically == temporally).
     pub fn insert(&self, record: ProofRecord) {
         let mut records = self
             .records
@@ -87,9 +87,22 @@ impl ProofStore {
                 poisoned.into_inner()
             });
         if records.len() >= self.max_entries {
-            // Evict one arbitrary entry to stay bounded
-            if let Some(key) = records.keys().next().cloned() {
-                records.remove(&key);
+            // MiniMax audit finding MED-04 / Copilot LOW observation:
+            // `keys().next().cloned()` evicted a NON-DETERMINISTIC entry
+            // (HashMap iteration order is stable within a run but not
+            // predictable across runs, and certainly not time-ordered).
+            // A fresh proof record could be evicted while a stale one
+            // from hours ago remained. Now evicts the lexicographically
+            // smallest `timestamp` — which is the earliest, since every
+            // record carries an RFC 3339 UTC timestamp produced by the
+            // pipeline helper, and RFC 3339 UTC strings sort the same
+            // lexicographically and temporally.
+            if let Some(oldest_key) = records
+                .iter()
+                .min_by(|(_, a), (_, b)| a.timestamp.cmp(&b.timestamp))
+                .map(|(k, _)| k.clone())
+            {
+                records.remove(&oldest_key);
             }
         }
         records.insert(record.request_id.clone(), record);

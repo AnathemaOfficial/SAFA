@@ -29,6 +29,22 @@ impl BootHashes {
     /// This value is embedded in every `PublicManifest` so that any change
     /// to the effective policy surface — even one that leaves an agent's
     /// own caps untouched — produces a visibly different proof hash.
+    ///
+    /// MiniMax audit finding MED-03: this hash is computed over the RAW
+    /// TOML file bytes at load time (see `load_config`), not over a
+    /// canonicalized parse tree. That means two policy files that are
+    /// semantically identical but differ in whitespace, key ordering, or
+    /// comment content will produce different policy bundle hashes. This
+    /// is INTENTIONAL and it IS the feature — the point of the bundle
+    /// hash is to attest to the exact file state an operator deployed,
+    /// not just the logical policy that state happens to express. An
+    /// external auditor who wants to verify a daemon's `manifest_hash`
+    /// against an expected value must check the exact bytes of the
+    /// policy files in place, not re-canonicalize first. A whitespace
+    /// change committed by a code formatter is a real operational event
+    /// that the attestation surfaces; suppressing it behind canonicalization
+    /// would let a text editor silently invalidate downstream consumers'
+    /// hash comparisons without flipping the attested hash.
     pub fn policy_bundle_hash(&self) -> String {
         // Canonical concatenation with explicit field labels: any reordering,
         // renaming, or addition of fields produces a different hash.
@@ -692,7 +708,19 @@ impl AmaConfig {
         // ── Build intent mappings ────────────────────────────
         let mut intents = HashMap::new();
         for (name, raw_intent) in &raw_intents.intents {
-            // On Linux, verify binary exists (skip on Windows for dev)
+            // Boot-time binary existence check.
+            //
+            // MiniMax audit finding MED-01: on Windows this check is
+            // skipped by design — the production deployment target is
+            // Linux (see README + systemd units + FP-4 hardening), and
+            // Windows developer machines may have the declared binaries
+            // at paths that don't match the linux-oriented `intents.toml`
+            // (e.g. `/usr/bin/bash` on a Windows dev checkout). Keeping
+            // the check Unix-only means Windows devs can build + run
+            // unit tests without rewriting their intents.toml, at the
+            // cost of deferring the "binary missing" error from boot to
+            // actuation time on Windows. That trade is explicitly
+            // accepted because Windows is not a production target.
             #[cfg(unix)]
             {
                 let bin_path = Path::new(&raw_intent.binary);

@@ -381,10 +381,23 @@ pub async fn process_action(
 
     let result = result?;
 
+    // MiniMax audit finding MED-02: replace the prior `.unwrap()` with
+    // explicit fallback. Action-result serialization is infallible under
+    // the current enum, but a future variant carrying a non-serializable
+    // value would have panicked the async request path. We now propagate
+    // a ServiceUnavailable so the daemon returns 503 + tracing::error
+    // instead of killing the runtime task.
+    let result_json = serde_json::to_value(&result).map_err(|err| {
+        tracing::error!(?err, "failed to serialize action result");
+        AmaError::ServiceUnavailable {
+            message: "result serialization failed".into(),
+        }
+    })?;
+
     Ok(ActionResponse {
         status: "authorized".into(),
         action_id,
         dry_run: false,
-        result: Some(serde_json::to_value(&result).unwrap()),
+        result: Some(result_json),
     })
 }
