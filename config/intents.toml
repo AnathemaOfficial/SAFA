@@ -17,12 +17,19 @@ description = "Read file contents via cat"
 binary = "/usr/bin/git"
 args_template = ["status"]
 validators = []
-working_dir = "{{workspace_root}}"
-description = "Git status in workspace"
+# Codex adversarial audit: previously `working_dir = "{{workspace_root}}"`
+# resolved to the GLOBAL workspace root at config-load time, so every
+# agent running `git_status` saw the same shared state — a true
+# cross-agent read if the workspace was itself a git repo. The
+# placeholder `{{agent_workspace}}` is resolved at call time to
+# `workspace_root/{agent_id}`, matching the isolation that
+# WorkspacePath already enforces for file_read / file_write.
+working_dir = "{{agent_workspace}}"
+description = "Git status in the calling agent's workspace"
 
 [intents.git_log]
 binary = "/usr/bin/git"
 args_template = ["log", "--oneline", "-20"]
 validators = []
-working_dir = "{{workspace_root}}"
-description = "Recent git history"
+working_dir = "{{agent_workspace}}"
+description = "Recent git history in the calling agent's workspace"

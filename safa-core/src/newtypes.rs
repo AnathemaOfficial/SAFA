@@ -13,6 +13,14 @@ use std::path::{Path, PathBuf};
 pub struct WorkspacePath {
     canonical: PathBuf,
     relative: String,
+    /// The effective workspace root this path must remain under (the
+    /// per-agent subdirectory when `agent_id` was supplied, otherwise the
+    /// global `workspace_root`). Stored so that actuators performing
+    /// filesystem operations can re-validate containment **after**
+    /// creating missing parent directories — closing the TOCTOU gap
+    /// between the validation-time `canonicalize` and the execution-time
+    /// `create_dir_all` (Codex + Ana + Copilot H-04 convergence).
+    effective_root: PathBuf,
 }
 
 impl WorkspacePath {
@@ -118,6 +126,7 @@ impl WorkspacePath {
         Ok(Self {
             canonical,
             relative: relative.to_string(),
+            effective_root: effective_root_canon,
         })
     }
 
@@ -126,6 +135,13 @@ impl WorkspacePath {
     }
     pub fn relative(&self) -> &str {
         &self.relative
+    }
+    /// The canonical effective workspace root this path must remain
+    /// under. Used by the file actuator to re-validate containment
+    /// after `create_dir_all` may have resolved an attacker-injected
+    /// intermediate symlink.
+    pub fn effective_root(&self) -> &Path {
+        &self.effective_root
     }
 }
 

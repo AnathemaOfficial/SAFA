@@ -178,10 +178,16 @@ fn canonicalize(
 }
 
 /// Execute the canonical action (actuation step) with per-action timeout.
+///
+/// `agent_id` is required so that `shell_exec` can resolve
+/// `{{agent_workspace}}` in the intent's `working_dir` to the per-agent
+/// subdirectory (Codex adversarial audit: previously every agent inherited
+/// the GLOBAL `workspace_root` for shell_exec, bypassing P3 isolation).
 async fn actuate(
     action: CanonicalAction,
     action_id: &str,
     config: &AmaConfig,
+    agent_id: Option<&str>,
 ) -> Result<ActionResult, AmaError> {
     match action {
         CanonicalAction::FileWrite { path, content } => {
@@ -232,10 +238,47 @@ async fn actuate(
                 }
                 exec_args.push(tmpl.clone());
             }
-            let working_dir = intent_config
-                .working_dir
-                .as_deref()
-                .unwrap_or(config.workspace_root.to_str().unwrap_or("/tmp"));
+            // Resolve intent working_dir placeholders at runtime so that
+            // `{{agent_workspace}}` can be scoped to the calling agent.
+            // Codex adversarial audit: the former load-time substitution
+            // resolved `{{workspace_root}}` to the GLOBAL workspace root
+            // with no agent_id in the path, so built-in intents like
+            // `git_status` / `git_log` silently ran from a shared cwd
+            // across every agent. Now resolution happens here, with the
+            // caller's agent_id in scope:
+            //   {{workspace_root}}  → global config.toml value
+            //   {{agent_workspace}} → workspace_root/{agent_id} (safe)
+            //
+            // A declared working_dir that references `{{agent_workspace}}`
+            // without a resolvable agent_id fails closed — no silent
+            // fallback to the global workspace. A declared
+            // `{{workspace_root}}` without `{{agent_workspace}}` is
+            // warned at boot (see config.rs) but still permitted, because
+            // some operators legitimately want a shared read-only
+            // working directory.
+            let workspace_root_str = config.workspace_root.to_str().unwrap_or("/tmp");
+            let resolved_working_dir: String = match intent_config.working_dir.as_deref() {
+                Some(template) => {
+                    let mut resolved = template.replace("{{workspace_root}}", workspace_root_str);
+                    if resolved.contains("{{agent_workspace}}") {
+                        let aid = agent_id.ok_or_else(|| AmaError::ServiceUnavailable {
+                            message: "intent requires {{agent_workspace}} but no agent_id in request".into(),
+                        })?;
+                        let agent_ws = format!("{}/{}", workspace_root_str, aid);
+                        resolved = resolved.replace("{{agent_workspace}}", &agent_ws);
+                    }
+                    resolved
+                }
+                None => {
+                    // Default: per-agent workspace when the caller is known,
+                    // otherwise the global workspace root (backward compat).
+                    match agent_id {
+                        Some(aid) => format!("{}/{}", workspace_root_str, aid),
+                        None => workspace_root_str.to_string(),
+                    }
+                }
+            };
+            let working_dir = resolved_working_dir.as_str();
             let timeout = action_timeout("shell_exec");
             let arg_refs: Vec<&str> = exec_args.iter().map(|s| s.as_str()).collect();
             let result = crate::actuator::shell::shell_exec(
@@ -358,7 +401,9 @@ pub async fn process_action(
     }
 
     // 7. Actuate
-    let result = actuate(canonical, &action_id, config).await;
+    //    agent_id is forwarded so shell_exec can resolve the
+    //    {{agent_workspace}} placeholder per P3 isolation.
+    let result = actuate(canonical, &action_id, config, agent_id).await;
 
     let (status_str, truncated) = match &result {
         Ok(r) => ("authorized", r.is_truncated()),

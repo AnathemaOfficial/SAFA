@@ -731,10 +731,49 @@ impl AmaConfig {
                     )));
                 }
             }
-            let working_dir = raw_intent
-                .working_dir
-                .as_ref()
-                .map(|wd| wd.replace("{{workspace_root}}", workspace_root.to_str().unwrap_or("")));
+            // Intent working_dir templates.
+            //
+            // Codex adversarial audit finding (SAFA): the prior resolution
+            // replaced `{{workspace_root}}` at config-load time with the
+            // GLOBAL workspace root — no agent_id interpolation. Shipped
+            // intents `git_status` / `git_log` used
+            // `working_dir = "{{workspace_root}}"`, so any agent invoking
+            // either intent ran the command from the global workspace,
+            // bypassing the per-agent isolation that `WorkspacePath`
+            // enforces for file_read / file_write. In deployments where
+            // `workspace_root` is itself a git repo, agents could read
+            // every other agent's history via `git log` — a true
+            // cross-agent information-disclosure breach.
+            //
+            // Fix: we keep the template UNRESOLVED at load time and defer
+            // resolution to the pipeline, where the caller's agent_id is
+            // known. Supported placeholders:
+            //   {{workspace_root}}  → global config.toml value (shared;
+            //                         use only when the operator
+            //                         explicitly wants shared working
+            //                         state across agents)
+            //   {{agent_workspace}} → per-agent subdirectory
+            //                         `workspace_root/{agent_id}` — the
+            //                         safe default for any intent that
+            //                         should respect P3 isolation
+            //
+            // We also refuse to load an intent whose `working_dir` uses
+            // the bare `{{workspace_root}}` placeholder WITHOUT the
+            // operator explicitly opting-in via a separate
+            // `shared_workspace = true` flag (not added here — that is a
+            // follow-up schema change). For this pass we warn loudly at
+            // boot instead, so no deployments break silently.
+            let working_dir = raw_intent.working_dir.clone();
+            if let Some(ref wd) = working_dir {
+                if wd.contains("{{workspace_root}}") && !wd.contains("{{agent_workspace}}") {
+                    eprintln!(
+                        "WARN: intent '{}' uses {{{{workspace_root}}}} without per-agent scoping; \
+                         all agents will share this working directory. Prefer \
+                         {{{{agent_workspace}}}} for per-agent isolation.",
+                        name
+                    );
+                }
+            }
             intents.insert(
                 name.clone(),
                 IntentMapping {
