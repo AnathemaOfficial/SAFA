@@ -1,4 +1,8 @@
+<img width="1199" height="349" alt="SAFA" src="https://github.com/user-attachments/assets/6ea5070d-c4da-47b8-80db-3c7c93acae82" />
+
 # SAFA
+
+###SLIME Adaptor For Agent
 
 **SAFA** is a policy evaluation engine designed for **autonomous AI agents and LLM tool-use systems**.
 
