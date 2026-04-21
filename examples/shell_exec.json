@@ -1,7 +1,0 @@
-{
-  "adapter": "generic",
-  "action": "shell_exec",
-  "target": "list_dir",
-  "magnitude": 1,
-  "args": ["src"]
-}

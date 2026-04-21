@@ -1,7 +1,0 @@
-{
-  "adapter": "langchain",
-  "action": "http_request",
-  "method": "GET",
-  "target": "https://api.weather.com/current",
-  "magnitude": 1
-}

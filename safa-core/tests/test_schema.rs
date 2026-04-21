@@ -99,5 +99,5 @@ fn rejects_adapter_over_64_chars() {
 
 #[test]
 fn accepts_identifier_style_adapter() {
-    assert!(validate_adapter("slapy_mobile-preview_1").is_ok());
+    assert!(validate_adapter("generic_mobile-preview_1").is_ok());
 }

@@ -1,90 +1,170 @@
-<img width="1199" height="349" alt="SAFA" src="https://github.com/user-attachments/assets/7e8d87a7-8695-4057-a019-3562f047a119" />
+# SAFA
 
-### SAFA - SLIME Adapter for Agents
+**SAFA** is a policy evaluation engine designed for autonomous agents and LLM-driven systems.
 
-> Agent-facing adaptation layer over a constrained actuation substrate.
+It provides a deterministic way to decide whether a given action is authorized, based on explicit policy and validated input.
 
-SAFA is the layer that accepts agent requests, validates and canonicalizes them,
-maps them to finite domains, and allows actuation only after constrained
-authorization.
+---
 
-SAFA is **not** an agent. It is an adapter, proxy, translator, and bounded
-executor.
+## What SAFA Does
 
-This project was initially developed under the working name **AMA**
-(`Agent Machine Armor`). The runtime surface still uses `/ama/` routes for
-backward compatibility.
+SAFA evaluates:
+
+- structured input
+- policy rules
+- contextual constraints
+
+And produces a **canonical authorization verdict**:
+
+- `Authorized`
+- `Impossible`
+
+This binary outcome is the core guarantee of SAFA.
+
+---
+
+## What SAFA Does NOT Do
+
+SAFA does **not**:
+
+- perform network requests
+- execute actions
+- manage credentials
+- store state or logs
+- implement product-specific workflows
+- integrate with external providers
+
+SAFA is **not a runtime**.
+It is a **decision engine**.
+
+---
+
+## Why SAFA Exists
+
+Autonomous systems (agents, LLM tools, automation pipelines) need:
+
+- predictable authorization
+- explicit policy boundaries
+- deterministic outcomes
+- safe composition with external systems
+
+SAFA provides a minimal, composable layer for:
+
+> **"Can this action happen?"**
+
+It does not answer:
+
+> **"How is this action executed?"**
+
+---
+
+## Core Properties
+
+### Binary Verdict
+
+All canonical decisions reduce to:
+
+- `Authorized`
+- `Impossible`
+
+Transport or validation errors are **not** verdicts.
+
+---
+
+### No Effectful I/O
+
+SAFA performs **no effectful I/O** before authorization:
+
+- no network calls
+- no writes
+- no execution
+
+Read-only validation is allowed (e.g. structure, metadata).
+
+---
+
+### Product-Agnostic
+
+SAFA has:
+
+- no knowledge of products
+- no provider-specific logic
+- no UI or UX assumptions
+
+It is designed to be embedded in any system.
+
+---
+
+## Example (Conceptual)
+
+```rust
+let verdict = safa.evaluate(policy, input);
+
+match verdict {
+    Authorized => {
+        // proceed to execution (outside SAFA)
+    }
+    Impossible => {
+        // reject action
+    }
+}
+```
+
+---
+
+## Composition
+
+SAFA is designed to be composed with:
+
+- agent runtimes
+- LLM toolchains
+- automation systems
+- execution layers
+
+It can be used standalone or as part of a larger architecture.
+
+---
+
+## Doctrine
+
+SAFA is governed by explicit doctrinal rules:
+
+- binary canonical verdicts
+- no effectful I/O before authorization
+- strict separation between policy and execution
+- product-agnostic design
+
+See:
+
+- `docs/doctrine/SAFA_DOCTRINAL_AMENDMENTS.md`
+- `docs/doctrine/SAFA_COMPLIANCE_SCORE.md`
+
+---
+
+## CI & Integrity
+
+SAFA includes automated checks to prevent architectural drift:
+
+- doctrinal CI checks
+- compliance scoring
+- invariant enforcement
+
+These ensure SAFA remains:
+
+- deterministic
+- composable
+- product-independent
+
+---
+
+## Design Philosophy
+
+> If a policy engine starts to know what it is used for, it is already broken.
+
+SAFA exists to remain small, strict, and predictable.
+
+---
 
 ## Status
 
-**Current truth:** P3 substrate resealed, with real containment properties, but
-documentation must not overstate full maturity beyond the checked workspace and
-tests.
-
-- real HTTP contract
-- real HMAC identity binding
-- real per-agent manifests and proof hash surfaces
-- real per-agent workspace isolation
-- embedded SLIME mode by default
-- `/ama/*` prefix still present for compatibility
-
-## Architecture
-
-SAFA is a Cargo workspace with two crates:
-
-| Crate | Role | HTTP dependency |
-|-------|------|-----------------|
-| `safa-core` | decision engine (validate, map, authorize, actuate) | none |
-| `safa-daemon` | HTTP transport wrapper | `axum` |
-
-Current request path:
-
-```
-Agent -> SAFA -> constrained substrate -> actuation
-```
-
-The substrate exposed today is narrower than the broadest historical wording:
-
-- `file_write -> fs.write.workspace`
-- `file_read -> fs.read.workspace`
-- `shell_exec -> proc.exec.bounded`
-- `http_request -> net.out.http`
-
-## Endpoints
-
-> Endpoints currently use the `/ama/` prefix for backward compatibility.
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | liveness check |
-| GET | `/version` | version info |
-| GET | `/ama/status` | per-agent capacity + domain stats |
-| GET | `/ama/manifest/{agent_id}` | capability manifest + policy hash |
-| POST | `/ama/action` | execute action |
-| GET | `/ama/proof/{request_id}` | proof record lookup |
-
-## Running
-
-```bash
-cargo build --workspace --release
-./target/release/safa-daemon
-```
-
-## Tests
-
-```bash
-cargo test --workspace --features test-utils
-cargo clippy --workspace --features test-utils -- -D warnings
-```
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| `docs/ARCHITECTURE.md` | system architecture and design decisions |
-| `docs/CAPACITY_MODEL.md` | two-layer capacity model |
-| `docs/THREAT_MODEL.md` | threat model and security invariants |
-| `docs/KNOWN_ISSUES_P1.md` | known issues and resolution status |
-| `docs/HELLO_WORLD_PACKAGING_CANDIDATE.md` | package-level Hello World candidate for the bounded adapter surface |
-| `docs/HELLO_WORLD_QUICKSTART.md` | validation flow for the hello-world demo agent |
-
+Active development - designed for integration with modern autonomous systems and LLM-based tooling.

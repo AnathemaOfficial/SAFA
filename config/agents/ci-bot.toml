@@ -1,5 +1,5 @@
 # CI bot agent — moderate capacity with burst-tolerant window
-# Use case: automated pipelines, scheduled tasks, batch operations
+# Use case: automated pipelines, recurring automation, batch operations
 
 [agent]
 agent_id = "ci-bot"
