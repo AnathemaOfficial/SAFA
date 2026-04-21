@@ -30,8 +30,13 @@ pub fn is_private_ip(ip: IpAddr) -> bool {
             || v4.octets()[0] == 0 // 0.0.0.0/8
         }
         IpAddr::V6(v6) => {
+            let octets = v6.octets();
+            let is_unique_local = (octets[0] & 0xfe) == 0xfc; // fc00::/7
+            let is_link_local = octets[0] == 0xfe && (octets[1] & 0xc0) == 0x80; // fe80::/10
             v6.is_loopback()           // ::1
             || v6.is_unspecified()     // ::
+            || is_unique_local
+            || is_link_local
             // IPv4-mapped IPv6 addresses
             || v6.to_ipv4_mapped().is_some_and(|v4| {
                 v4.is_loopback() || v4.is_private() || v4.is_link_local()
@@ -148,12 +153,10 @@ pub async fn http_request(
     // address is unknown — the post-connect check is the only layer that
     // catches a DNS record that rebound between `validate_dns` and the
     // reqwest connect.
-    let remote_addr = response
-        .remote_addr()
-        .ok_or_else(|| AmaError::Validation {
-            error_class: "invalid_target".into(),
-            message: "could not determine remote IP for post-connect validation".into(),
-        })?;
+    let remote_addr = response.remote_addr().ok_or_else(|| AmaError::Validation {
+        error_class: "invalid_target".into(),
+        message: "could not determine remote IP for post-connect validation".into(),
+    })?;
     let ip = remote_addr.ip();
     if is_private_ip(ip) {
         return Err(AmaError::Validation {
