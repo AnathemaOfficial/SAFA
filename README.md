@@ -2,7 +2,7 @@
 
 # SAFA
 
-###SLIME Adaptor For Agent
+### SLIME Adaptor For Agent
 
 **SAFA** is a policy evaluation engine designed for **autonomous AI agents and LLM tool-use systems**.
 
