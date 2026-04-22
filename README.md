@@ -2,100 +2,121 @@
 
 # SAFA
 
-### SLIME Adaptor For Agent
+**SAFA — SLIME Adaptor For Agents**
 
-**SAFA** is a policy evaluation engine designed for **autonomous AI agents and LLM tool-use systems**.
+A policy evaluation engine for **autonomous AI agents and LLM tool-use systems**.
 
-It provides a deterministic, composable way to decide whether an action is authorized — without executing it.
+SAFA is the **judgment layer** between intent and execution:
+it determines whether an action is authorized — without executing it.
 
 ---
 
-## Overview
+## Acronym
+
+**SAFA** stands for:
+
+> **SLIME Adaptor For Agents**
+
+- **SLIME** → structural model defining what can exist  
+- **Adaptor** → bridges structured intent to executable systems  
+- **Agents** → autonomous systems and LLM tool-use environments  
+
+SAFA is a **policy engine**, not a runtime system.
+
+---
+
+## Core Role
 
 SAFA answers a single question:
 
-> **"Can this action happen?"**
+> **Can this action happen?**
 
-Given:
-- structured input
-- explicit policy
-- validated context
+It does **not**:
+- execute actions  
+- perform orchestration  
+- define workflows  
 
-SAFA produces a **canonical authorization verdict**:
-
-- `Authorized`
-- `Impossible`
-
-This binary outcome is the core guarantee of the system.
+Execution always happens **outside SAFA**.
 
 ---
 
 ## Repository Structure
 
-This repository intentionally contains three distinct layers:
+This repository contains three layers:
 
-### 1. `safa-core` — Policy Engine (Canonical Layer)
+### 1. `safa-core` — Canonical Policy Engine
 
-The core evaluation engine.
+The core judgment engine.
 
 Responsibilities:
-- policy evaluation
-- rule application
-- canonical verdict generation
-- deterministic decision logic
+- policy evaluation  
+- rule application  
+- canonical verdict generation  
 
 Properties:
-- no runtime dependencies
-- no network access
-- no side effects
-- no product knowledge
+- deterministic  
+- no product semantics  
+- no provider logic  
+- no effectful I/O before authorization  
 
 ---
 
-### 2. `safa-daemon` — Reference Implementation (Transport Layer)
+### 2. `safa-daemon` — Reference Transport Surface
 
-A minimal HTTP daemon exposing SAFA to external systems.
+A minimal HTTP interface exposing SAFA.
 
 Purpose:
-- demonstrate real-world usage
-- enable agent/LLM integration
-- provide a testable standalone surface
+- demonstrate real usage  
+- enable agent/LLM integration  
+- support testing  
 
 Important:
-- this is a **reference implementation**, not a product runtime
-- it does not define product workflows
-- it does not implement business logic
+
+> `safa-daemon` is a **reference implementation**, not a product runtime.
+
+It does **not**:
+- implement business logic  
+- define workflows  
+- act as a system membrane  
 
 ---
 
-### 3. `actuators` — Generic Effect Adapters (Post-Authorization Layer)
+### 3. `actuators` — Post-Authorization Adapters
 
-Optional components that execute actions **after authorization**.
+Generic components that execute effects **after authorization**.
 
 Examples:
-- file operations
-- shell execution
-- HTTP calls
+- file operations  
+- shell execution  
+- HTTP calls  
 
-Properties:
-- generic and product-agnostic
-- invoked only after a valid `Authorized` verdict
-- exist for demonstration and integration purposes
+Important:
+
+> Actuators are **adapters**, not the core system.
+
+They exist for:
+- demonstration  
+- integration  
+
+They are not:
+- product integrations  
+- workflow engines  
 
 ---
 
-## What SAFA Does NOT Do
+## What SAFA Is NOT
 
-SAFA explicitly does **not**:
+SAFA is **not**:
 
-- define product behavior
-- implement user-facing workflows
-- manage credentials or OAuth flows
-- encode provider-specific business logic
-- act as a full runtime system
-- function as a product "membrane"
+- a product backend  
+- a workflow engine  
+- a runtime system  
+- a system membrane  
+- a provider integration layer  
 
-Execution, orchestration, and product logic must live **outside SAFA**.
+SAFA does not replace system architecture.
+
+It only provides **authorization judgment**.
 
 ---
 
@@ -103,130 +124,104 @@ Execution, orchestration, and product logic must live **outside SAFA**.
 
 ### Binary Canonical Verdict
 
-All authorization decisions resolve to:
+All canonical decisions resolve to:
 
-- `Authorized`
-- `Impossible`
+- `Authorized`  
+- `Impossible`  
 
-Transport errors, validation failures, or system issues are **not** canonical verdicts.
+Transport or validation errors are **not** canonical verdicts.
 
 ---
 
 ### No Effectful I/O Before Authorization
 
-SAFA performs:
+SAFA performs no side effects before judgment:
 
-- no network calls
-- no filesystem writes
-- no external execution
-
-before producing a verdict.
+- no network calls  
+- no writes  
+- no execution  
 
 Read-only validation is allowed.
 
 ---
 
-### Deterministic & Composable
+### Deterministic
 
-- same input → same verdict
-- no hidden state
-- safe to embed in larger systems
+Same input → same verdict.
+
+No hidden state. No implicit behavior.
 
 ---
 
-### Product-Agnostic by Design
+### Product-Agnostic
 
 SAFA contains:
-- no product names
-- no provider integrations
-- no UX assumptions
+- no product vocabulary  
+- no provider-specific logic  
+- no UX assumptions  
 
-It is designed to integrate into:
-- agent runtimes
-- LLM toolchains
-- automation systems
-- custom execution layers
+It is designed to remain usable **without knowledge of any product**.
 
 ---
 
-## Example (Conceptual)
+## Execution Boundary
 
-```rust
+SAFA defines a strict boundary:
+
+```text
+Intent → SAFA → Verdict → Execution (external)
+
+SAFA stops at the verdict.
+
+Execution belongs to another system.
+
+Example (Conceptual)
 let verdict = safa.evaluate(policy, input);
 
-match verdict {
-    Authorized => {
-        // proceed with execution (outside SAFA)
-    }
-    Impossible => {
-        // reject action
-    }
+if verdict == Authorized {
+    // execution handled outside SAFA
+} else {
+    // reject action
 }
-```
+Doctrinal Integrity
 
----
+SAFA enforces:
 
-## Doctrinal Integrity
+Binary verdict at the canonical layer
+No effectful I/O before authorization
+Strict separation: judgment ≠ execution
+Product isolation
 
-SAFA is governed by strict architectural rules:
+If a policy engine starts to know what it is used for, it is already broken.
 
-- **Binary verdict purity** — Canonical authorization is strictly `Authorized | Impossible`
-- **No effectful I/O before authorization** — No side effects occur before a decision is made
-- **Separation of concerns** — Policy (SAFA) ≠ Execution (external systems)
-- **Product isolation** — SAFA must not "know" what it is used for
+Relationship to SLIME-Core
+SLIME-Core → defines what can exist
+SAFA → determines what is allowed
 
-> If a policy engine starts to know what it is used for, it is already broken.
+SAFA operates on top of structural constraints defined elsewhere.
 
-See:
-- [`docs/doctrine/SAFA_DOCTRINAL_AMENDMENTS.md`](docs/doctrine/SAFA_DOCTRINAL_AMENDMENTS.md)
-- [`docs/doctrine/SAFA_COMPLIANCE_SCORE.md`](docs/doctrine/SAFA_COMPLIANCE_SCORE.md)
+Intended Use
 
----
+SAFA is designed for:
 
-## Positioning
+autonomous AI agents
+LLM tool-use systems
+automation pipelines requiring strict authorization
+systems needing deterministic policy evaluation
+Important Clarification
 
-SAFA is intended for:
+SAFA is a judgment engine with a reference transport surface.
 
-- autonomous AI agents
-- LLM tool-use systems
-- secure automation pipelines
-- deterministic authorization layers
+It is not:
 
-It is **not**:
-
-- a product backend
-- a workflow engine
-- an execution runtime
-- a system membrane
-
----
-
-## Reference vs Product Systems
-
-This repository demonstrates **how SAFA can be used**, not how a full system should be built.
-
-- `safa-core` → canonical engine
-- `safa-daemon` → reference transport layer
-- `actuators` → generic execution adapters
-
-Production systems are expected to:
-
-- implement their own runtime
-- define their own orchestration
-- enforce their own boundaries
-
----
-
-## Status
+a complete system
+a runtime platform
+a security solution by itself
+Status
 
 Active development.
 
-SAFA is evolving as a foundational component for safe, deterministic authorization in agent-driven systems.
+Philosophy
 
----
-
-## Philosophy
-
-Keep the decision engine small, strict, and predictable.
-
+Keep the judgment engine small, strict, and predictable.
 Everything else belongs outside.
