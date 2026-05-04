@@ -9,7 +9,7 @@ vulnerabilities affecting this repository.
 
 ## Reporting
 
-- To report a vulnerability, contact: **syfcorp@proton.me**
+- To report a vulnerability, contact: **corexalt@proton.me**
 - Please include:
   - Affected version (release tag or commit SHA).
   - Reproduction steps, ideally with a minimal proof-of-concept.
