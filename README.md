@@ -11,6 +11,23 @@ it determines whether an action is authorized — without executing it.
 
 ---
 
+## Controlled Product Layer
+
+SAFA is an **applied product layer** built from the public CoreXalt engine
+lineage:
+
+```text
+SYF-Core -> SYF-Gate -> SYF-Shield -> Anathema-Breaker -> SLIME-Core
+```
+
+The public engines remain open as the inspectable law and audit surface. SAFA is
+the agent-facing judgment assembly derived from those engines. Professional,
+enterprise, or government deployments should use sealed product editions with
+controlled access, signed releases, SBOM/provenance, and a frozen audited
+baseline.
+
+---
+
 ## Acronym
 
 **SAFA** stands for:
